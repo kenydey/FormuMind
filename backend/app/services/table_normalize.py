@@ -235,7 +235,9 @@ _UNIT_MAP: dict[str, str] = {
 # Full-width → half-width (digits and common symbols).
 _FW_TRANS = str.maketrans("０１２３４５６７８９．，－＋％", "0123456789.,-+%")
 
-_NUM_RE = re.compile(r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)")
+_NUM_RE = re.compile(r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:[eE][+-]?\d+)?")
+# v29 Phase2 M-11: 支持科学计数法（如 1.2e-3、2E+5）。此前 1.2e-3 会被
+# 切成 (1.2, 'e-3')，数值丢失。
 _CMP_PREFIX_CHARS = "≥≤><≧≦=＝~～ \t"
 
 

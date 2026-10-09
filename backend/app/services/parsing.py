@@ -366,6 +366,64 @@ def _docx_table_to_markdown(table) -> str:
     return "\n".join(lines)
 
 
+def _docx_walk_elements(
+    parent, para_by_el: dict, tbl_by_el: dict, depth: int = 0
+) -> list[str]:
+    """v29 Phase2 M-5/M-6/L-11: DOCX 递归 walker。
+
+    处理嵌套表（表内表）、SDT 内容控件（w:sdt）、文本框（w:txbxContent）。
+    depth 防无限递归（上限 10）。
+    """
+    if depth > 10:
+        return []
+    parts: list[str] = []
+    for child in parent:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "p":
+            # 段落：也检查是否含文本框（w:txbxContent）
+            t = para_by_el.get(child, "")
+            if t.strip():
+                parts.append(t.strip())
+            # 文本框内容（L-11）
+            for txbx in child.iter():
+                ttag = txbx.tag.split("}")[-1] if "}" in txbx.tag else txbx.tag
+                if ttag == "txbxContent":
+                    for p_el in txbx:
+                        ptag = p_el.tag.split("}")[-1] if "}" in p_el.tag else p_el.tag
+                        if ptag == "p":
+                            pt = para_by_el.get(p_el, "")
+                            if pt.strip() and pt.strip() not in parts:
+                                parts.append(f"[文本框] {pt.strip()}")
+        elif tag == "tbl":
+            t = tbl_by_el.get(child)
+            if t is not None:
+                md = _docx_table_to_markdown(t)
+                if md:
+                    parts.append(md)
+                # 嵌套表（M-5）：检查单元格内的嵌套表格
+                # python-docx 的 table.cells 可能含嵌套表，需通过 _tbl 查找
+                try:
+                    for row in t.rows:
+                        for cell in row.cells:
+                            for nested in cell._tc.iter():
+                                ntag = nested.tag.split("}")[-1] if "}" in nested.tag else nested.tag
+                                if ntag == "tbl" and nested is not child:
+                                    nt = tbl_by_el.get(nested)
+                                    if nt is not None:
+                                        nmd = _docx_table_to_markdown(nt)
+                                        if nmd and nmd not in parts:
+                                            parts.append(f"[嵌套表]\n{nmd}")
+                except Exception:
+                    pass
+        elif tag == "sdt":
+            # SDT 内容控件（M-6）：递归处理 sdtContent
+            for sdt_content in child:
+                ctag = sdt_content.tag.split("}")[-1] if "}" in sdt_content.tag else sdt_content.tag
+                if ctag == "sdtContent":
+                    parts.extend(_docx_walk_elements(sdt_content, para_by_el, tbl_by_el, depth + 1))
+    return parts
+
+
 # v29 Phase1 M-7/M-3: zip 炸弹防护 —— OOXML（docx/xlsx）是 zip，
 # 恶意小文件可解压出 GB 级内容。统一检查未压缩总大小。
 _ZIP_BOMB_MAX_UNCOMPRESSED = 100 * 1024 * 1024  # 100MB
@@ -402,21 +460,10 @@ def _parse_docx(content: bytes) -> str | None:
         # v28 P-1: 按文档顺序交错提取段落与表格 —— 此前只读 doc.paragraphs，
         # 表格被静默丢弃。body 层 w:p/w:tbl 按出现顺序走；表内段落不在
         # body 层出现，不会重复计入。
+        # v29 Phase2: 改用递归 walker（_docx_walk_elements），处理嵌套表/SDT/文本框。
         para_by_el = {p._p: p.text for p in doc.paragraphs}
         tbl_by_el = {t._tbl: t for t in doc.tables}
-        parts: list[str] = []
-        for child in doc.element.body:
-            tag = child.tag.split("}")[-1]
-            if tag == "p":
-                t = para_by_el.get(child, "")
-                if t.strip():
-                    parts.append(t.strip())
-            elif tag == "tbl":
-                t = tbl_by_el.get(child)
-                if t is not None:
-                    md = _docx_table_to_markdown(t)
-                    if md:
-                        parts.append(md)
+        parts = _docx_walk_elements(doc.element.body, para_by_el, tbl_by_el)
         text = "\n\n".join(parts)
         return text if text.strip() else None
     except ImportError:

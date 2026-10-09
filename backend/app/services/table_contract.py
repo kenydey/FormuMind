@@ -266,20 +266,48 @@ def _parse_pipe_table(text: str) -> tuple[list[str], list[list[str]]]:
 
 
 class _TableHTMLParser(HTMLParser):
-    """Minimal <table> → rows of cell text (stdlib only)."""
+    """Minimal <table> → rows of cell text (stdlib only).
+
+    v29 Phase2 M-10: 支持 rowspan/colspan —— 此前忽略 span 属性，
+    合并单元格导致列错位。
+    """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.rows: list[list[str]] = []
         self._row: list[str] | None = None
         self._cell: list[str] | None = None
+        self._cell_span: tuple[int, int] = (1, 1)  # (rowspan, colspan)
+        # 跨行占位：{row_idx: {col_idx: text}}，用于 rowspan 填充
+        self._rowspan_fill: dict[int, dict[int, str]] = {}
+        self._cur_row_idx: int = 0
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         tag = tag.lower()
         if tag == "tr":
             self._row = []
+            # 填充上一行 rowspan 留下的单元格
+            fill = self._rowspan_fill.pop(self._cur_row_idx, {})
+            # 按列序插入
+            for col in sorted(fill):
+                # 确保 _row 长度足够
+                while len(self._row) < col:
+                    self._row.append("")
+                if len(self._row) == col:
+                    self._row.append(fill[col])
         elif tag in ("td", "th"):
             self._cell = []
+            # 解析 rowspan/colspan
+            ad = {k.lower(): v for k, v in attrs}
+            try:
+                rs = max(1, int(ad.get("rowspan", 1)))
+            except (ValueError, TypeError):
+                rs = 1
+            try:
+                cs = max(1, int(ad.get("colspan", 1)))
+            except (ValueError, TypeError):
+                cs = 1
+            self._cell_span = (rs, cs)
         elif tag == "br" and self._cell is not None:
             self._cell.append(" ")
 
@@ -287,12 +315,30 @@ class _TableHTMLParser(HTMLParser):
         tag = tag.lower()
         if tag in ("td", "th") and self._row is not None and self._cell is not None:
             text = _html.unescape("".join(self._cell)).strip()
-            self._row.append(re.sub(r"\s+", " ", text))
+            text = re.sub(r"\s+", " ", text)
+            rs, cs = self._cell_span
+            col_idx = len(self._row)
+            # 主单元格
+            self._row.append(text)
+            # colspan：横向填充空字符串（保持列对齐）
+            for _ in range(1, cs):
+                self._row.append("")
+            # rowspan：记录后续行需填充的位置
+            if rs > 1:
+                for r in range(1, rs):
+                    fill_row = self._cur_row_idx + r
+                    if fill_row not in self._rowspan_fill:
+                        self._rowspan_fill[fill_row] = {}
+                    # 填充主列和 colspan 列
+                    for c in range(cs):
+                        self._rowspan_fill[fill_row][col_idx + c] = text if c == 0 else ""
             self._cell = None
+            self._cell_span = (1, 1)
         elif tag == "tr" and self._row is not None:
             if any(c.strip() for c in self._row):
                 self.rows.append(self._row)
             self._row = None
+            self._cur_row_idx += 1
 
     def handle_data(self, data: str) -> None:
         if self._cell is not None:
