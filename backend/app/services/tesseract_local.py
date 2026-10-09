@@ -116,11 +116,48 @@ def cjk_ratio(text: str) -> float:
     return len(_cjk_re().findall(text)) / max(len(text), 1)
 
 
+def _vote_language(content: bytes, n_pages: int) -> str:
+    """v2 P2 M-10: 前 N 页 CJK 占比投票决定语言。"""
+    from . import pdf_local
+
+    votes = {"chi_sim": 0, "eng": 0}
+    doc = None
+    try:
+        try:
+            doc = pdf_local._open(content)
+        except Exception:
+            return "eng"
+        for page_no in range(1, n_pages + 1):
+            png = pdf_local.page_as_png(content, page_no, dpi=80, _doc=doc)
+            if not png:
+                continue
+            # 快速 OCR 一小部分判断语言（用 eng 先跑，统计 CJK）
+            text = ocr_png(png, lang="eng")
+            del png
+            if not text:
+                continue
+            cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+            if cjk / max(len(text), 1) > 0.1:
+                votes["chi_sim"] += 1
+            else:
+                votes["eng"] += 1
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+    return "chi_sim" if votes["chi_sim"] > votes["eng"] else "eng"
+
+
 def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | None:
     """Every page via Tesseract, assembled with page markers.
 
     v29 Phase3 M-2: 页数上限（默认 30，与 rapidocr 对齐）——
     此前无上限，超大扫描 PDF 会 OCR 数百页，耗时数小时。
+
+    v2 P2 M-10: lang="auto" 时多页投票 —— 此前只看第一页，
+    英文封面+中文正文会被整篇判英文。现采样前 3 页投票。
     """
     if not tesseract_available():
         return None
@@ -138,15 +175,35 @@ def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | Non
         )
         _truncated = True
         total = max_pages
+
+    # v2 P2 M-10: 多页语言投票
+    if lang == "auto":
+        lang = _vote_language(content, min(total, 3))
+        logger.info("tesseract: 多页投票语言=%s", lang)
     rendered: list[tuple[int, str]] = []
-    for page_no in range(1, total + 1):
-        png = pdf_local.page_as_png(content, page_no, dpi=120)
-        if not png:
-            continue
-        text = ocr_png(png, lang=lang)
-        del png
-        if text:
-            rendered.append((page_no, text))
+    # v2 P2 M-9: 复用 PDF 句柄 —— 一次打开，多页渲染
+    doc = None
+    try:
+        from . import pdf_local as _pl
+
+        try:
+            doc = _pl._open(content)
+        except Exception:
+            doc = None
+        for page_no in range(1, total + 1):
+            png = pdf_local.page_as_png(content, page_no, dpi=120, _doc=doc)
+            if not png:
+                continue
+            text = ocr_png(png, lang=lang)
+            del png
+            if text:
+                rendered.append((page_no, text))
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
     if not rendered:
         return None
     result = pdf_local.assemble(rendered)

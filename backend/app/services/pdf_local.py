@@ -394,14 +394,20 @@ def page_count(content: bytes) -> int:
         return degrade_return(logger, exc, "pdf_local page_count failed", 0)
 
 
-def page_as_png(content: bytes, page_no: int, dpi: int = 150) -> bytes | None:
-    """One page rendered to PNG — for scans, where there is no text to keep."""
+def page_as_png(content: bytes, page_no: int, dpi: int = 150, *, _doc=None) -> bytes | None:
+    """One page rendered to PNG — for scans, where there is no text to keep.
+
+    v2 P2 M-9: 支持复用已打开的 doc（`_doc` 参数）—— 此前每页重开 PDF，
+    30 页 = 31 次 xref 解析。调用方批量渲染时传入 `_doc` 可复用。
+    """
     # v29 Phase1 H-1: MediaBox 尺寸上限 —— 畸形 MediaBox（如 200×200 英寸）
     # 会导致 get_pixmap 一次分配 ~3.3GB，OOM 杀死 worker。
     # 上限：单页像素数不超过 100MP（约 A0@300dpi 的 2 倍），超限降 dpi。
     _MAX_PIXELS = 100_000_000
     try:
-        source = _open(content)
+        # v2 P2 M-9: 复用句柄
+        source = _doc if _doc is not None else _open(content)
+        own_doc = _doc is None
         try:
             if not 1 <= page_no <= source.page_count:
                 return None
@@ -439,7 +445,9 @@ def page_as_png(content: bytes, page_no: int, dpi: int = 150) -> bytes | None:
                 # waiting for the collector on a 2 GB box.
                 del pixmap
         finally:
-            source.close()
+            # v2 P2 M-9: 仅关闭自己打开的 doc，复用的不关
+            if own_doc:
+                source.close()
     except Exception as exc:
         return degrade_return(logger, exc, f"pdf_local page_as_png({page_no}) failed", None)
 
