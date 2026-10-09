@@ -35,7 +35,11 @@ def tesseract_available() -> bool:
 
 
 def ocr_png(png: bytes, lang: str = "eng") -> str | None:
-    """One rasterised page → text, or None. Never raises."""
+    """One rasterised page → text, or None. Never raises.
+
+    v29 Phase5 L-7: 置信度标注 —— 用 tsv 获取逐词置信度，
+    低置信度（<60）的词标记为 [?词]，提醒下游可能是 OCR 幻觉。
+    """
     if not png or not tesseract_available():
         return None
     path = None
@@ -43,13 +47,24 @@ def ocr_png(png: bytes, lang: str = "eng") -> str | None:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(png)
             path = f.name
+        # 先拿 tsv（含置信度）
         r = subprocess.run(
+            ["tesseract", path, "stdout", "-l", lang, "tsv"],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        text = _tsv_to_text_with_confidence(r.stdout)
+        if text:
+            return text
+        # tsv 失败时回退纯文本
+        r2 = subprocess.run(
             ["tesseract", path, "stdout", "-l", lang],
             capture_output=True,
             text=True,
             timeout=180,
         )
-        return r.stdout.strip() or None
+        return r2.stdout.strip() or None
     except Exception as exc:
         return degrade_return(logger, exc, "tesseract page failed", None)
     finally:
@@ -58,6 +73,40 @@ def ocr_png(png: bytes, lang: str = "eng") -> str | None:
                 os.unlink(path)
             except OSError:
                 pass
+
+
+def _tsv_to_text_with_confidence(tsv: str, min_conf: int = 60) -> str | None:
+    """TSV → 文本，低置信度词标记为 [?词]。"""
+    lines = tsv.strip().split("\n")
+    if len(lines) < 2:
+        return None
+    words: list[str] = []
+    low_count = 0
+    for line in lines[1:]:  # 跳过表头
+        parts = line.split("\t")
+        if len(parts) < 12:
+            continue
+        # level 5 = word
+        if parts[0] != "5":
+            continue
+        try:
+            conf = int(float(parts[10]))
+        except (ValueError, IndexError):
+            conf = -1
+        word = parts[11].strip()
+        if not word:
+            continue
+        if 0 <= conf < min_conf:
+            words.append(f"[?{word}]")
+            low_count += 1
+        else:
+            words.append(word)
+    if not words:
+        return None
+    text = " ".join(words)
+    if low_count:
+        logger.debug("tesseract: %d 低置信度词已标记", low_count)
+    return text
 
 
 def cjk_ratio(text: str) -> float:

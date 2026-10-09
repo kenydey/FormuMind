@@ -394,12 +394,51 @@ def _promote_blank_header(
     return first, body
 
 
+def _is_borderless_row(line: str) -> bool:
+    """单行是否像无框线表格行：2+ 个多空格分隔的列。"""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("|") or "<table" in stripped.lower():
+        return False
+    # 2+ 空格分隔
+    parts = [p for p in stripped.split("  ") if p.strip()]
+    return len(parts) >= 2
+
+
+def _looks_like_borderless_table(lines: list[str], i: int, n: int) -> bool:
+    """连续 3+ 行都像无框线表格行。"""
+    if i + 2 >= n:
+        return False
+    return all(_is_borderless_row(lines[j]) for j in range(i, i + 3))
+
+
+def _borderless_to_pipe(buf: list[str]) -> str | None:
+    """无框线文本块 → pipe table（按多空格切分）。"""
+    rows = []
+    for line in buf:
+        parts = [p.strip() for p in line.strip().split("  ") if p.strip()]
+        if len(parts) >= 2:
+            rows.append(parts)
+    if len(rows) < 3:
+        return None
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = [
+        "| " + " | ".join(rows[0]) + " |",
+        "|" + "|".join("---" for _ in rows[0]) + "|",
+    ]
+    lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
+    return "\n".join(lines)
+
+
 def blocks_from_markdown(markdown: str) -> list[MdBlock]:
     """Split parser markdown into blocks; pipe/HTML tables become table blocks.
 
     Page tracking: ``<!-- page:N -->`` markers (what chunking consumes) and the
     raw docling ``<!-- docling-page-break -->`` placeholder. Captions are
     matched nearby: up to 3 text lines before the table, else 1 line after.
+
+    v29 Phase5 L-13: 无框线表格基础检测 —— 连续 3+ 行、2+ 空格分隔、
+    列对齐的文本块识别为表格（启发式，fail-open）。
     """
     lines = (markdown or "").splitlines()
     blocks: list[MdBlock] = []
@@ -450,6 +489,21 @@ def blocks_from_markdown(markdown: str) -> list[MdBlock]:
                 i = j
                 continue
             # Not a real table — fall through and re-scan line by line.
+
+        # v29 Phase5 L-13: 无框线表格 —— 连续 3+ 行、多空格分隔对齐
+        if _looks_like_borderless_table(lines, i, n):
+            buf = [lines[i]]
+            j = i + 1
+            while j < n and _is_borderless_row(lines[j]):
+                buf.append(lines[j])
+                j += 1
+            # 转为 pipe table 文本
+            pipe = _borderless_to_pipe(buf)
+            if pipe:
+                blocks.append(MdBlock(type="table", page_idx=page_idx, text=pipe))
+                table_line_nos.append(i)
+                i = j
+                continue
 
         i += 1
 
