@@ -84,3 +84,31 @@ def test_known_metrics_covers_predictor_props():
     assert produced, "predictor.py 中未扫描到 props 键"
     missing = produced - set(KNOWN_METRICS)
     assert not missing, f"KNOWN_METRICS 漏掉 predictor 产出的指标: {sorted(missing)}"
+
+
+def test_v28_rc1_domain_map_matches_predictor_output():
+    """v28 RC-1 漂移守护：domain_applicable_metrics 必须 ⊆ predictor 各 domain 实际产出。
+
+    否则 422 会放行 predictor 实际不产出的指标，静默 0 分错排死灰复燃。
+    """
+    from app.domain.objective_contract import KNOWN_METRICS, domain_applicable_metrics
+    from app.domain.schemas import Formulation, Ingredient, ProductDomain
+    from app.services import predictor
+
+    def _form(domain: ProductDomain) -> Formulation:
+        return Formulation(
+            name="t",
+            domain=domain,
+            ingredients=[
+                Ingredient(name="环氧树脂", weight_pct=60.0, role="resin"),
+                Ingredient(name="固化剂", weight_pct=40.0, role="hardener"),
+            ],
+        )
+
+    for domain in ProductDomain:
+        actual = set(predictor.predict(_form(domain)).keys())
+        claimed = set(domain_applicable_metrics(domain))
+        # 映射只承诺 KNOWN_METRICS 成员；viscoelastic_index 等非契约指标不计
+        claimed = claimed & set(KNOWN_METRICS)
+        over = claimed - actual
+        assert not over, f"{domain.value}: 映射声称可用但 predictor 未产出: {sorted(over)}"

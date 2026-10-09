@@ -141,8 +141,12 @@ def _resolve_request_objectives(body: RecommendFormulationsRequest) -> list[Obje
     v27 P1-8: 显式 objectives 强校验 —— 别名解析后仍不在 KNOWN_METRICS
     的 metric 直接 422（提示合法取值），不再静默 0 分错排。
     requirement 派生的默认目标是可信源，不校验。
+
+    v28 RC-1: domain 适用性校验 —— metric 合法但当前 domain 的 predictor
+    不产出时，下游 props.get(metric, 0.0) 静默 0 分错排（P1-8 只拦了完全
+    未知 metric，domain 错配是同类缺口的另一半），同样 422。
     """
-    from ..domain.objective_contract import KNOWN_METRICS
+    from ..domain.objective_contract import KNOWN_METRICS, domain_applicable_metrics
 
     if body.objectives:
         resolved = [normalize_objective(o) for o in body.objectives]
@@ -155,6 +159,19 @@ def _resolve_request_objectives(body: RecommendFormulationsRequest) -> list[Obje
                     f"合法取值: {', '.join(sorted(KNOWN_METRICS))}"
                 ),
             )
+        domain = getattr(body.requirement, "domain", None)
+        if domain is not None:
+            applicable = domain_applicable_metrics(domain)
+            mismatched = [o.metric for o in resolved if o.metric not in applicable]
+            if mismatched:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"指标 {', '.join(mismatched)} 不适用于当前 domain"
+                        f"（{domain.value}），该 predictor 不产出这些指标。"
+                        f"该 domain 可用指标: {', '.join(sorted(applicable))}"
+                    ),
+                )
         return resolved
     return normalize_objectives(body.requirement)
 

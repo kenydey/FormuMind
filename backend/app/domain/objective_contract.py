@@ -46,6 +46,36 @@ KNOWN_METRICS: frozenset[str] = frozenset(
 )
 
 
+# v28 RC-1: 各 domain 的 predictor 实际产出指标（与 predictor.py 的 domain 分支对齐）。
+# 通用指标（_cost_and_sustainability）所有 domain 都产出。
+# 显式 objectives 的 metric 合法但不在当前 domain 集合时，下游
+# props.get(metric, 0.0) 会静默 0 分错排 —— API 层 422 拦截。
+# tests/test_objective_contract.py 有漂移测试守护本映射与 predictor 实际产出一致。
+_UNIVERSAL_METRICS: frozenset[str] = frozenset(
+    {"cost_cny_per_kg", "voc_gpl", "sustainability_idx"}
+)
+_DOMAIN_METRICS: dict[str, frozenset[str]] = {
+    # key 取 ProductDomain.value，避免 domain→service 倒置（v22 原则）
+    "anticorrosion_coating": frozenset(
+        {"salt_spray_hours", "film_weight_gsm", "adhesion_mpa", "pencil_hardness_idx"}
+    ),
+    "degreaser": frozenset({"cleaning_efficiency", "foam_index", "bath_life_cycles"}),
+    "surface_treatment": frozenset(
+        {"coating_weight_gsm", "salt_spray_hours", "adhesion_promotion_idx"}
+    ),
+    # autodeposition_coating 走 predictor 的 else（surface_treatment）分支
+    "autodeposition_coating": frozenset(
+        {"coating_weight_gsm", "salt_spray_hours", "adhesion_promotion_idx"}
+    ),
+}
+
+
+def domain_applicable_metrics(domain: ProductDomain) -> frozenset[str]:
+    """当前 domain 的 predictor 实际产出的指标集合（含通用指标）。"""
+    key = domain.value if isinstance(domain, ProductDomain) else str(domain)
+    return _UNIVERSAL_METRICS | _DOMAIN_METRICS.get(key, frozenset())
+
+
 _METRIC_UNITS: dict[str, str] = {
     "salt_spray_hours": "h",
     "cleaning_efficiency": "%",

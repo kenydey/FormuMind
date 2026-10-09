@@ -201,3 +201,29 @@ def test_pdf_downloader_raw_fallback_still_works():
     pdf = b"%PDF-1.4\nstream\n" + stream + b"\nendstream\n"
     text = pdf_downloader._raw_pdf_stream_text(pdf)
     assert "Hello patent text" in text
+
+
+def _make_docx_with_table() -> bytes:
+    docx = pytest.importorskip("docx")
+    import io
+
+    doc = docx.Document()
+    doc.add_paragraph("前言段落")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "成分"
+    table.cell(0, 1).text = "含量%"
+    table.cell(1, 0).text = "环氧树脂"
+    table.cell(1, 1).text = "65"
+    doc.add_paragraph("后记段落")
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_v28_p1_parse_docx_keeps_tables_in_order():
+    """v28 P-1: _parse_docx 不得静默丢弃表格，且保持文档顺序。"""
+    out = parsing._parse_docx(_make_docx_with_table())
+    assert out is not None
+    assert "环氧树脂" in out and "65" in out, "表格内容丢失"
+    assert "| 成分 | 含量% |" in out, "表格应转为 pipe table"
+    assert out.index("前言段落") < out.index("成分") < out.index("后记段落")

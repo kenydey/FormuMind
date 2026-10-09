@@ -346,12 +346,50 @@ def _parse_pypdf(content: bytes) -> str | None:
         return None
 
 
+def _docx_table_to_markdown(table) -> str:
+    """Render a python-docx table as a pipe table (one block, no surrounding text)."""
+    rows: list[list[str]] = []
+    for row in table.rows:
+        rows.append(
+            [c.text.strip().replace("|", "\\|").replace("\n", " ") for c in row.cells]
+        )
+    rows = [r for r in rows if any(r)]
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = [
+        "| " + " | ".join(rows[0]) + " |",
+        "|" + "|".join("---" for _ in rows[0]) + "|",
+    ]
+    lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
+    return "\n".join(lines)
+
+
 def _parse_docx(content: bytes) -> str | None:
     try:
         import docx  # type: ignore
 
         doc = docx.Document(io.BytesIO(content))
-        text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        # v28 P-1: 按文档顺序交错提取段落与表格 —— 此前只读 doc.paragraphs，
+        # 表格被静默丢弃。body 层 w:p/w:tbl 按出现顺序走；表内段落不在
+        # body 层出现，不会重复计入。
+        para_by_el = {p._p: p.text for p in doc.paragraphs}
+        tbl_by_el = {t._tbl: t for t in doc.tables}
+        parts: list[str] = []
+        for child in doc.element.body:
+            tag = child.tag.split("}")[-1]
+            if tag == "p":
+                t = para_by_el.get(child, "")
+                if t.strip():
+                    parts.append(t.strip())
+            elif tag == "tbl":
+                t = tbl_by_el.get(child)
+                if t is not None:
+                    md = _docx_table_to_markdown(t)
+                    if md:
+                        parts.append(md)
+        text = "\n\n".join(parts)
         return text if text.strip() else None
     except ImportError:
         return None

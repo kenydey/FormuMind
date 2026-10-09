@@ -56,6 +56,7 @@ class ResearchGraphState(TypedDict, total=False):
     grade: GradeVerdict | None
     grade_reason: str
     fallback_used: bool
+    fallback_evidence: list[Evidence]  # v28 R-1: fallback 纠错 evidence 独立键，不与 retrieve 共用 evidence
     answer: str
     citations: list[Evidence]
     recommended: list[Formulation]
@@ -346,7 +347,9 @@ def fallback_node(
 
     if evidence:
         colbert_store.index_evidence(evidence, settings=settings)
-        state["evidence"] = evidence
+        # v28 R-1: 写独立键 —— 此前直接覆盖 state["evidence"]，紧接着的
+        # retrieve_node 全新检索又把它覆盖掉，纠错 evidence 从未进入第二轮 grade。
+        state["fallback_evidence"] = evidence
     state["fallback_used"] = True
     state["stage"] = "fallback"
     return state
@@ -627,6 +630,14 @@ def _run_crag_retrieval(
         _emit(progress_cb, "fallback", "重试搜索")
         state = fallback_node(state, settings, mode=mode)
         state = retrieve_node(state, settings, mode=mode)
+        # v28 R-1: 把 fallback 的纠错 evidence 合并进第二轮检索结果（去重），
+        # 再 grade —— 此前 fallback 写 state["evidence"] 被 retrieve 直接覆盖。
+        fb = state.get("fallback_evidence") or []
+        if fb:
+            seen = {e.identifier or e.title for e in (state.get("evidence") or [])}
+            state["evidence"] = list(state.get("evidence") or []) + [
+                e for e in fb if (e.identifier or e.title) not in seen
+            ]
         state = grade_node(state, settings)
 
     return state

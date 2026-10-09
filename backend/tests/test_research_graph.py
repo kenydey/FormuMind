@@ -237,6 +237,18 @@ def test_graph_survives_a_failing_federated_search(monkeypatch, settings):
     monkeypatch.setattr(colbert_store, "search", lambda *a, **k: [])
     monkeypatch.setattr(kb_index, "search_chunks", lambda *a, **k: [])
     monkeypatch.setattr("app.services.llm.complete_json", lambda prompt: None)
+    # v28: 显式锁定 grade 为 incorrect —— 全量运行时某些前置测试会污染
+    # 全局状态（如 settings 单例、llm_rerank 插件开关），导致 heuristic
+    # 误判为 correct 而跳过 fallback。本测试验证的是 fallback 生存能力，
+    # 不依赖 grade 启发式的具体行为。
+    from app.pipeline import research_graph as rg
+
+    monkeypatch.setattr(
+        rg, "grade_evidence",
+        lambda topic, evidence, settings=None: rg.GradeResult(
+            verdict=rg.GradeVerdict.incorrect, reason="test: force fallback"
+        ),
+    )
 
     state = run_research_graph(
         topic="水性环氧防腐涂料",
@@ -250,3 +262,42 @@ def test_graph_survives_a_failing_federated_search(monkeypatch, settings):
     assert called, "the fallback never ran — this test would prove nothing"
     assert state.get("fallback_used") is True
     assert isinstance(state, dict) and state.get("stage")
+
+
+def test_v28_r1_fallback_evidence_merged_not_overwritten(settings):
+    """v28 R-1: fallback 的纠错 evidence 不得被第二轮 retrieve 覆盖，应合并去重后 grade。"""
+    from app.pipeline import research_graph as rg
+
+    fb_ev = [Evidence(source="web", identifier="fb-1", title="FB", snippet="x", relevance=0.9)]
+    fresh_ev = [Evidence(source="kb", identifier="kb-1", title="KB", snippet="y", relevance=0.8)]
+    graded_inputs: list[list] = []
+
+    def fake_fallback(state, settings=None, *, mode="deep"):
+        state["fallback_evidence"] = list(fb_ev)
+        state["fallback_used"] = True
+        return state
+
+    def fake_retrieve(state, settings=None, *, mode="deep"):
+        # 真实 retrieve_node 会全新覆盖 state["evidence"]
+        state["evidence"] = list(fresh_ev)
+        return state
+
+    def fake_grade(state, settings=None):
+        graded_inputs.append(list(state.get("evidence") or []))
+        # 第一轮判 incorrect 触发 fallback，第二轮判 correct 结束
+        state["grade"] = (
+            GradeVerdict.incorrect if len(graded_inputs) == 1 else GradeVerdict.correct
+        )
+        return state
+
+    state: dict = {"query": "test", "topic": "test"}
+    with (
+        patch.object(rg, "fallback_node", fake_fallback),
+        patch.object(rg, "retrieve_node", fake_retrieve),
+        patch.object(rg, "grade_node", fake_grade),
+    ):
+        rg._run_crag_retrieval(state, settings, mode="deep", progress_cb=None)
+
+    assert len(graded_inputs) == 2, "应经历 retrieve→grade→fallback→retrieve→grade"
+    ids = {e.identifier for e in graded_inputs[-1]}
+    assert ids == {"fb-1", "kb-1"}, f"fallback evidence 丢失: {ids}"

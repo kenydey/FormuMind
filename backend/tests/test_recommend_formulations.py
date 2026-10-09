@@ -106,3 +106,49 @@ def test_recommend_formulations_alias_metric_still_ok():
         },
     )
     assert res.status_code == 200
+
+
+def test_v28_rc1_domain_mismatched_metric_422():
+    """v28 RC-1: 合法 metric 但不适用于当前 domain → 422，不再静默 0 分错排。"""
+    res = client.post(
+        "/api/formulations/recommend",
+        json={
+            "requirement": Requirement(domain=ProductDomain.degreaser).model_dump(),
+            "objectives": [
+                {"metric": "salt_spray_hours", "weight": 1.0, "direction": "maximize"},
+            ],
+            "n": 2,
+        },
+    )
+    assert res.status_code == 422
+    assert "salt_spray_hours" in res.json()["detail"]
+
+
+def test_v28_rc1_domain_matched_metric_ok():
+    """v28 RC-1: 同 domain 适用 metric → 200（不误杀）。"""
+    res = client.post(
+        "/api/formulations/recommend",
+        json={
+            "requirement": Requirement(domain=ProductDomain.degreaser).model_dump(),
+            "objectives": [
+                {"metric": "cleaning_efficiency", "weight": 1.0, "direction": "maximize"},
+            ],
+            "n": 2,
+        },
+    )
+    assert res.status_code == 200
+
+
+def test_v28_rc1_universal_metric_ok_all_domains():
+    """v28 RC-1: 通用指标（cost）在各 domain 均可用。"""
+    res = client.post(
+        "/api/formulations/recommend",
+        json={
+            "requirement": Requirement(domain=ProductDomain.degreaser).model_dump(),
+            "objectives": [
+                {"metric": "cost_cny_per_kg", "weight": 1.0, "direction": "minimize"},
+            ],
+            "n": 2,
+        },
+    )
+    assert res.status_code == 200
