@@ -1753,7 +1753,9 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                     kind, payload = await asyncio.wait_for(queue.get(), timeout=120)
                     if kind == "tok":
                         parts.append(payload)
-                        yield _sse({"type": "token", "delta": payload})
+                        # v29 M-17: 拒答门前置 —— 先缓冲不直接 yield，
+                        # 门触发时直接发拒答，避免"先出字后闪烁替换"。
+                        # （门在 answer 完整后判定，此处仅缓冲）
                     else:
                         break
             except asyncio.TimeoutError:
@@ -1813,7 +1815,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 logger.warning("chat/stream claims 失败: %s", exc)
                 _verified = None
             # P2 运行时门（与同步 /chat 对齐）：数值检查 → 冲突透出 → 拒答硬门。
-            # 前端 done 用 ev.answer 替换流式内容，门触发时最终展示门控后答案。
+            # v29 M-17: 门在流式前判定 —— 门通过才 yield tokens，门触发直接发拒答，
+            # 不再"先出字后闪烁替换"。
             answer, claims, _abstained, _gate_notices = _apply_answer_gates(
                 question,
                 answer,
@@ -1822,6 +1825,11 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 _verified,
                 settings,
             )
+
+            # 门通过：补发缓冲的 tokens（保持流式体验）；门触发：不发 tokens
+            if not _abstained:
+                for tok in parts:
+                    yield _sse({"type": "token", "delta": tok})
 
             evidence_provenance = None
             try:
