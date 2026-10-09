@@ -160,6 +160,13 @@ def build_plan_with_fallback(
                 f"混料设计 {design!r} 生成失败: {exc} — "
                 "混料约束(成分和=100%)无法由无约束 LHS 兜底, 请检查因子数/设计参数"
             ) from exc
+        # v29 M-14: bbdesign 参数非法不再静默降级为 lhs ——
+        # 用户要的是 Box-Behnken，给 lhs 是错的。直接报错让调用方修正参数。
+        if design == "bbdesign":
+            raise ValueError(
+                f"bbdesign 生成失败: {exc} — "
+                "请检查因子数(3-5为宜)/中心点参数，不自动降级为 lhs"
+            ) from exc
         # v9: 离散因子的 fail-closed 不得被 fallback 击穿 ——
         # build_pydoe_plan 对离散 raise ValueError 是有意的设计，
         # 吞掉它会降级到 native lhs 的静默 clamp 路径（doe.py P1-7）。
