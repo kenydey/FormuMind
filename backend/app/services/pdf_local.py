@@ -408,9 +408,19 @@ def page_as_png(content: bytes, page_no: int, dpi: int = 150) -> bytes | None:
             pixels = (w_pt * dpi / 72) * (h_pt * dpi / 72)
             use_dpi = dpi
             if pixels > _MAX_PIXELS:
-                # 按比例降 dpi，使像素数回到上限内
+                # v2 H-5: 去掉 dpi 下限 36 —— 此前 max(36, ...) 在极端
+                # MediaBox 下仍超像素上限（如 100000pt 在 dpi=36 仍 25 亿像素）。
+                # 现降 dpi 后仍超限则直接拒绝渲染。
                 scale = (_MAX_PIXELS / pixels) ** 0.5
-                use_dpi = max(36, int(dpi * scale))
+                use_dpi = int(dpi * scale)
+                # 复算确认
+                pixels2 = (w_pt * use_dpi / 72) * (h_pt * use_dpi / 72)
+                if pixels2 > _MAX_PIXELS or use_dpi < 1:
+                    logger.warning(
+                        "page_as_png: 页面尺寸异常 %.0f×%.0f pt，拒绝渲染（防 OOM）",
+                        w_pt, h_pt,
+                    )
+                    return None
                 logger.warning(
                     "page_as_png: 页面尺寸异常 %.0f×%.0f pt，dpi %d→%d（防 OOM）",
                     w_pt, h_pt, dpi, use_dpi,

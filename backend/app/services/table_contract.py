@@ -270,6 +270,8 @@ class _TableHTMLParser(HTMLParser):
 
     v29 Phase2 M-10: 支持 rowspan/colspan —— 此前忽略 span 属性，
     合并单元格导致列错位。
+    v2 H-4: 列占用追踪 —— 非首列 rowspan 时新单元格跳过被占列；
+    嵌套 table 深度追踪；未闭合 tr 自动 flush。
     """
 
     def __init__(self) -> None:
@@ -281,20 +283,39 @@ class _TableHTMLParser(HTMLParser):
         # 跨行占位：{row_idx: {col_idx: text}}，用于 rowspan 填充
         self._rowspan_fill: dict[int, dict[int, str]] = {}
         self._cur_row_idx: int = 0
+        # v2 H-4: 嵌套 table 深度（>0 时内层内容不污染外层）
+        self._table_depth: int = 0
+        # v2 H-4: 当前行被占用的列（rowspan 遗留 + 本行已写）
+        self._occupied: set[int] = set()
+
+    def _next_free_col(self) -> int:
+        """v2 H-4: 找当前行下一个未被占用的列。"""
+        col = 0
+        while col in self._occupied:
+            col += 1
+        return col
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         tag = tag.lower()
+        if tag == "table":
+            self._table_depth += 1
+            return
+        if self._table_depth > 1:
+            return  # 嵌套表内层：跳过，避免污染外层
         if tag == "tr":
+            # v2 H-4: 未闭合 tr 自动 flush 上一行
+            if self._row is not None:
+                self._flush_row()
             self._row = []
+            self._occupied = set()
             # 填充上一行 rowspan 留下的单元格
             fill = self._rowspan_fill.pop(self._cur_row_idx, {})
-            # 按列序插入
             for col in sorted(fill):
+                self._occupied.add(col)
                 # 确保 _row 长度足够
-                while len(self._row) < col:
+                while len(self._row) <= col:
                     self._row.append("")
-                if len(self._row) == col:
-                    self._row.append(fill[col])
+                self._row[col] = fill[col]
         elif tag in ("td", "th"):
             self._cell = []
             # 解析 rowspan/colspan
@@ -311,37 +332,52 @@ class _TableHTMLParser(HTMLParser):
         elif tag == "br" and self._cell is not None:
             self._cell.append(" ")
 
+    def _flush_row(self) -> None:
+        """v2 H-4: 刷新当前行（用于 tr 结束或新 tr 开始时的未闭合处理）。"""
+        if self._row is not None and any(c.strip() for c in self._row):
+            self.rows.append(self._row)
+        self._row = None
+        self._cur_row_idx += 1
+
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
+        if tag == "table":
+            self._table_depth = max(0, self._table_depth - 1)
+            return
+        if self._table_depth > 1:
+            return
         if tag in ("td", "th") and self._row is not None and self._cell is not None:
             text = _html.unescape("".join(self._cell)).strip()
             text = re.sub(r"\s+", " ", text)
             rs, cs = self._cell_span
-            col_idx = len(self._row)
-            # 主单元格
-            self._row.append(text)
-            # colspan：横向填充空字符串（保持列对齐）
-            for _ in range(1, cs):
+            # v2 H-4: 找未被占用的列，而非 len(self._row)
+            col_idx = self._next_free_col()
+            # 确保 _row 长度足够
+            while len(self._row) <= col_idx:
                 self._row.append("")
+            self._row[col_idx] = text
+            self._occupied.add(col_idx)
+            # colspan：横向占用
+            for c in range(1, cs):
+                self._occupied.add(col_idx + c)
+                while len(self._row) <= col_idx + c:
+                    self._row.append("")
+                self._row[col_idx + c] = ""
             # rowspan：记录后续行需填充的位置
             if rs > 1:
                 for r in range(1, rs):
                     fill_row = self._cur_row_idx + r
                     if fill_row not in self._rowspan_fill:
                         self._rowspan_fill[fill_row] = {}
-                    # 填充主列和 colspan 列
                     for c in range(cs):
                         self._rowspan_fill[fill_row][col_idx + c] = text if c == 0 else ""
             self._cell = None
             self._cell_span = (1, 1)
         elif tag == "tr" and self._row is not None:
-            if any(c.strip() for c in self._row):
-                self.rows.append(self._row)
-            self._row = None
-            self._cur_row_idx += 1
+            self._flush_row()
 
     def handle_data(self, data: str) -> None:
-        if self._cell is not None:
+        if self._cell is not None and self._table_depth <= 1:
             self._cell.append(data)
 
 

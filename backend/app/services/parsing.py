@@ -477,9 +477,22 @@ def _parse_docx(content: bytes) -> str | None:
         # 表格被静默丢弃。body 层 w:p/w:tbl 按出现顺序走；表内段落不在
         # body 层出现，不会重复计入。
         # v29 Phase2: 改用递归 walker（_docx_walk_elements），处理嵌套表/SDT/文本框。
-        para_by_el = {p._p: p.text for p in doc.paragraphs}
-        tbl_by_el = {t._tbl: t for t in doc.tables}
-        parts = _docx_walk_elements(doc.element.body, para_by_el, tbl_by_el)
+        # v2 H-1/H-2/H-3: 用 body.iter 树遍历建映射（含嵌套/SDT/文本框内元素），
+        # 此前 doc.paragraphs/doc.tables 仅顶层，walker 分支为死代码。
+        from docx.oxml.ns import qn
+
+        body = doc.element.body
+        para_by_el = {el: _docx_p_text(el) for el in body.iter(qn("w:p"))}
+        # 表格映射：用 iter 含嵌套表，Table 代理按需构造
+        tbl_by_el = {}
+        for el in body.iter(qn("w:tbl")):
+            try:
+                from docx.table import Table as _DocxTable
+
+                tbl_by_el[el] = _DocxTable(el, doc)
+            except Exception:
+                continue
+        parts = _docx_walk_elements(body, para_by_el, tbl_by_el)
         text = "\n\n".join(parts)
         return text if text.strip() else None
     except ImportError:
@@ -487,6 +500,30 @@ def _parse_docx(content: bytes) -> str | None:
     except Exception as exc:
         log_handled_exception(logger, exc, "docx parse failed")
         return None
+
+
+def _docx_p_text(p_el) -> str:
+    """v2 H-2: 段落文本（不依赖 python-docx 的 p.text）。
+
+    p.text 只取 w:p 直接子的 w:r，漏掉 w:ins（修订插入）/超链接内文本。
+    此处直接读 w:t，显式排除 w:del（删除线）。
+    """
+    from docx.oxml.ns import qn
+
+    texts = []
+    for t_el in p_el.iter(qn("w:t")):
+        # 排除删除线内的文本
+        parent = t_el.getparent()
+        is_del = False
+        while parent is not None and parent is not p_el:
+            tag = parent.tag.split("}")[-1] if "}" in parent.tag else parent.tag
+            if tag == "del":
+                is_del = True
+                break
+            parent = parent.getparent()
+        if not is_del and t_el.text:
+            texts.append(t_el.text)
+    return "".join(texts)
 
 
 def _parse_xlsx(content: bytes) -> str | None:

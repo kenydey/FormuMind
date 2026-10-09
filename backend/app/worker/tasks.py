@@ -829,6 +829,15 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
         except OSError as exc:
             logger.warning("file ingest: cannot read %s (%s)", path, exc)
 
+    # v2 H-6: 批量内存预警 —— 全部文件常驻内存，大批量时预警。
+    # 完整流式化（读→哈希→处理→释放）需重构 dedup 链路，列为 P1。
+    total_mb = sum(len(c) for _, c in files) / (1024 * 1024)
+    if total_mb > 100:
+        logger.warning(
+            "file ingest: 批量 %d 文件共 %.0fMB 常驻内存，建议分批上传",
+            len(files), total_mb,
+        )
+
     # Content-hash dedup before parsing. The row's ``content_hash`` is taken
     # over the *extracted text*, which is only known after a parse (minutes of
     # OCR on a scan), so uploads are keyed by ``upload:sha256:<bytes>`` in
