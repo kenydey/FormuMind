@@ -42,6 +42,13 @@ KNOWN_METRICS: frozenset[str] = frozenset(
         "foam_index",
         "bath_life_cycles",
         "adhesion_promotion_idx",
+        # v29 M-7: predictor 实际产出但缺失的（曾导致 422 误杀）：
+        # predictor.py 的 rheology 分支
+        "viscoelastic_index",
+        "tg_celsius",
+        "viscosity_relative",
+        "cpvc_pct",
+        "pvc_to_cpvc_ratio",
     }
 )
 
