@@ -63,6 +63,9 @@ class ParseResult:
     # mineru tier — blocks with page/kind, tables, formulas. None for the
     # text chain. Consumed by ingestion → extraction_tables/formulas.
     structured: object = None
+    # v29 Phase3 D-1: 表格抽取可观测性 —— table_stats 记录抽取数/成功数/警告数，
+    # 便于发现静默丢表问题（如 H-6 类）。
+    table_stats: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -93,10 +96,23 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
             return result
         from . import table_contract as _tc
         blocks = _tc.blocks_from_markdown(result.markdown or "")
+        # v29 Phase3 D-1: 表格可观测性 —— 记录抽取统计
+        stats = {
+            "blocks_found": len(blocks),
+            "tables_extracted": 0,
+            "warnings": [],
+        }
         if not blocks:
+            result.table_stats = stats
             return result
         assets = _tc.extract_tables("", blocks, parser=result.parser)
         result.tables = assets
+        stats["tables_extracted"] = len(assets)
+        # 警告：发现块但未抽出表格（可能静默丢表）
+        if blocks and not assets:
+            stats["warnings"].append("发现表格块但未抽出资产，可能解析失败")
+            logger.warning("table_contract: %d blocks 但 0 assets（parser=%s）", len(blocks), result.parser)
+        result.table_stats = stats
     except Exception:
         logger.exception("table_contract: extraction failed (fail-open)")
     return result

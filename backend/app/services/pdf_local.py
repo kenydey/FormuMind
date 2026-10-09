@@ -98,8 +98,24 @@ def _open(content: bytes, *, name: str | None = None):
     import pymupdf  # type: ignore
 
     if name:
-        return pymupdf.open(stream=content, filetype="pdf", filename=name)
-    return pymupdf.open(stream=content, filetype="pdf")
+        doc = pymupdf.open(stream=content, filetype="pdf", filename=name)
+    else:
+        doc = pymupdf.open(stream=content, filetype="pdf")
+    # v29 Phase3 M-13: 加密 PDF 识别 —— 加密文档 get_text() 返回空，
+    # 会被误判为"扫描件"。此处尝试空密码解密，仍失败则标记。
+    if doc.is_encrypted:
+        try:
+            # 尝试空密码（部分文档用空密码加密）
+            if doc.authenticate(""):
+                logger.debug("PDF 用空密码解密成功")
+            else:
+                logger.warning("PDF 已加密且空密码失败，文本将为空（非扫描件）")
+                # 在 doc 上标记，供上游区分"加密" vs "扫描"
+                doc._formumind_encrypted = True  # type: ignore[attr-defined]
+        except Exception as exc:
+            logger.warning("PDF 解密尝试失败: %s", exc)
+            doc._formumind_encrypted = True  # type: ignore[attr-defined]
+    return doc
 
 
 def _layout_name(content: bytes, *, ocr: bool) -> str:
@@ -121,24 +137,29 @@ def _layout_name(content: bytes, *, ocr: bool) -> str:
 
 
 _layout_configured = False
+_layout_last_wanted: bool | None = None
 
 
 def _configure_layout() -> None:
     """Pin the layout engine to our setting instead of the library default.
 
-    Set once per process: `use_layout` tears down and rebuilds module globals,
-    so calling it per document would be both wasteful and racy.
+    v29 Phase3 M-12: 运行时配置变更检测 —— 此前进程级一次性，
+    运行时改 pdf_layout_analysis 不生效。现每次检查设置是否变化，
+    变化则重新配置。
     """
-    global _layout_configured
-    if _layout_configured:
-        return
+    global _layout_configured, _layout_last_wanted
     try:
         import pymupdf4llm  # type: ignore
 
         wanted = bool(get_settings().pdf_layout_analysis)
-        if getattr(pymupdf4llm, "_use_layout", None) is not wanted:
-            pymupdf4llm.use_layout(wanted)
-        _layout_configured = True
+        # 首次或设置变化时重新配置
+        if not _layout_configured or _layout_last_wanted != wanted:
+            if getattr(pymupdf4llm, "_use_layout", None) is not wanted:
+                pymupdf4llm.use_layout(wanted)
+            _layout_configured = True
+            _layout_last_wanted = wanted
+            if _layout_last_wanted != wanted:
+                logger.info("pdf_local: layout 配置已更新为 %s", wanted)
     except Exception as exc:  # pragma: no cover - older build without the switch
         logger.debug("pdf_local: layout switch unavailable (%s)", exc)
         _layout_configured = True
@@ -221,22 +242,27 @@ def extract_pages(content: bytes, *, ocr: bool | None = None) -> list[LocalPage]
             )
             pages: list[LocalPage] = []
             for index, chunk in enumerate(chunks):
-                markdown = (chunk.get("text") or "").strip()
-                n_tables, n_images, area_ratio = _page_signals(doc[index])
-                pages.append(
-                    LocalPage(
-                        page_no=index + 1,
-                        markdown=markdown,
-                        char_count=len(doc[index].get_text().strip()),
-                        n_tables=n_tables,
-                        n_images=n_images,
-                        image_area_ratio=area_ratio,
-                        # pymupdf4llm renders simple ruled tables as pipe
-                        # tables perfectly well. Knowing whether it managed is
-                        # what stops us paying a cloud parser to redo them.
-                        has_markdown_table="|---" in markdown.replace(" ", ""),
+                # v29 Phase3 M-14: 单页保护 —— 坏页不杀死整篇解析
+                try:
+                    markdown = (chunk.get("text") or "").strip()
+                    n_tables, n_images, area_ratio = _page_signals(doc[index])
+                    pages.append(
+                        LocalPage(
+                            page_no=index + 1,
+                            markdown=markdown,
+                            char_count=len(doc[index].get_text().strip()),
+                            n_tables=n_tables,
+                            n_images=n_images,
+                            image_area_ratio=area_ratio,
+                            # pymupdf4llm renders simple ruled tables as pipe
+                            # tables perfectly well. Knowing whether it managed is
+                            # what stops us paying a cloud parser to redo them.
+                            has_markdown_table="|---" in markdown.replace(" ", ""),
+                        )
                     )
-                )
+                except Exception as exc:
+                    logger.warning("pdf_local: 第 %d 页解析失败，已跳过: %s", index + 1, exc)
+                    continue
             return pages
         finally:
             doc.close()

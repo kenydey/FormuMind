@@ -67,8 +67,12 @@ def cjk_ratio(text: str) -> float:
     return len(_cjk_re().findall(text)) / max(len(text), 1)
 
 
-def ocr_pdf(content: bytes, lang: str = "eng") -> str | None:
-    """Every page via Tesseract, assembled with page markers."""
+def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | None:
+    """Every page via Tesseract, assembled with page markers.
+
+    v29 Phase3 M-2: 页数上限（默认 30，与 rapidocr 对齐）——
+    此前无上限，超大扫描 PDF 会 OCR 数百页，耗时数小时。
+    """
     if not tesseract_available():
         return None
     from . import pdf_local
@@ -76,6 +80,12 @@ def ocr_pdf(content: bytes, lang: str = "eng") -> str | None:
     total = pdf_local.page_count(content)
     if total <= 0:
         return None
+    if total > max_pages:
+        logger.warning(
+            "tesseract ocr: %d 页超上限 %d，仅处理前 %d 页",
+            total, max_pages, max_pages,
+        )
+        total = max_pages
     rendered: list[tuple[int, str]] = []
     for page_no in range(1, total + 1):
         png = pdf_local.page_as_png(content, page_no, dpi=120)
