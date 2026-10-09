@@ -273,6 +273,41 @@ Push-Location $BackendDir
 try { Invoke-Step "数据库迁移" { & $VenvPython -m alembic upgrade head } } finally { Pop-Location }
 Write-Host "    数据库已就绪"
 
+# ---- [5.5/5] Embedding 模型选择 ----
+Write-Step "[5.5/5] Embedding 模型选择"
+Write-Host "    选择向量模型（影响中英文检索质量）："
+Write-Host "    1) MiniLM-L6-v2 (默认, 90MB, 英文优先, 轻量)"
+Write-Host "    2) bge-small-zh-v1.5 (100MB, 中文)"
+Write-Host "    3) bge-m3 (推荐, ~2GB, 多语言, 解决跨语言召回)"
+Write-Host "    4) Qwen3-Embedding-0.6B (~1.2GB, 多语言)"
+Write-Host "    5) m3e-base (~200MB, 中文)"
+$embChoice = Read-Host "    请选择 [1-5, 默认1]"
+if ([string]::IsNullOrWhiteSpace($embChoice)) { $embChoice = "1" }
+switch ($embChoice) {
+  "2" { $embModel = "BAAI/bge-small-zh-v1.5" }
+  "3" { $embModel = "BAAI/bge-m3" }
+  "4" { $embModel = "Qwen/Qwen3-Embedding-0.6B" }
+  "5" { $embModel = "moka-ai/m3e-base" }
+  default { $embModel = "sentence-transformers/all-MiniLM-L6-v2" }
+}
+$envContent = Get-Content $envFile -Raw
+if ($envContent -match "^FORMUMIND_EMBEDDING_MODEL=") {
+  $envContent = $envContent -replace "^FORMUMIND_EMBEDDING_MODEL=.*", "FORMUMIND_EMBEDDING_MODEL=$embModel"
+  Set-Content $envFile $envContent -NoNewline
+} else {
+  Add-Content $envFile "`nFORMUMIND_EMBEDDING_MODEL=$embModel"
+}
+Write-Host "    已选择: $embModel"
+if ($embModel -eq "BAAI/bge-m3" -or $embModel -eq "Qwen/Qwen3-Embedding-0.6B") {
+  $dlAns = Read-Host "    模型约 1-2GB，是否现在下载？[y/N]"
+  if ($dlAns -match "^[Yy]$") {
+    Write-Host "    下载中..."
+    & $VenvPython -c "from huggingface_hub import snapshot_download; snapshot_download('$embModel', allow_patterns=['*.json','*.txt','*.model','*.safetensors','*.bin']); print('    下载完成')"
+  } else {
+    Write-Host "    已跳过下载，首次使用时自动下载"
+  }
+}
+
 # ---- 完成 ----
 Write-Host ""
 Write-Host "✅ 安装完成" -ForegroundColor Green
