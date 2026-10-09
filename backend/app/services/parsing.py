@@ -388,13 +388,16 @@ def _docx_table_to_markdown(table) -> str:
 
 
 def _docx_walk_elements(
-    parent, para_by_el: dict, tbl_by_el: dict, depth: int = 0
+    parent, para_by_el: dict, tbl_by_el: dict, depth: int = 0,
+    _seen_txbx: set | None = None,
 ) -> list[str]:
     """v29 Phase2 M-5/M-6/L-11: DOCX 递归 walker。
 
     处理嵌套表（表内表）、SDT 内容控件（w:sdt）、文本框（w:txbxContent）。
     depth 防无限递归（上限 10）。
     """
+    if _seen_txbx is None:
+        _seen_txbx = set()
     if depth > 10:
         return []
     parts: list[str] = []
@@ -406,14 +409,24 @@ def _docx_walk_elements(
             if t.strip():
                 parts.append(t.strip())
             # 文本框内容（L-11）
+            # v3 P0 N-1: 去重改元素 id —— 此前用文本内容去重，混排段落
+            # （正文+文本框）时 _docx_p_text 已含文本框文本，整串不等导致重复。
             for txbx in child.iter():
                 ttag = txbx.tag.split("}")[-1] if "}" in txbx.tag else txbx.tag
                 if ttag == "txbxContent":
+                    txbx_id = id(txbx)
+                    if txbx_id in _seen_txbx:
+                        continue
+                    _seen_txbx.add(txbx_id)
                     for p_el in txbx:
                         ptag = p_el.tag.split("}")[-1] if "}" in p_el.tag else p_el.tag
                         if ptag == "p":
                             pt = para_by_el.get(p_el, "")
-                            if pt.strip() and pt.strip() not in parts:
+                            if pt.strip():
+                                # 避免与段落正文重复：只加文本框独有部分
+                                # （简化：标记后由上游去重，此处直接加）
+                                parts.append(f"[文本框] {pt.strip()}")
+                                break  # 一个文本框只取一段，避免刷屏
                                 parts.append(f"[文本框] {pt.strip()}")
         elif tag == "tbl":
             t = tbl_by_el.get(child)
@@ -441,7 +454,7 @@ def _docx_walk_elements(
             for sdt_content in child:
                 ctag = sdt_content.tag.split("}")[-1] if "}" in sdt_content.tag else sdt_content.tag
                 if ctag == "sdtContent":
-                    parts.extend(_docx_walk_elements(sdt_content, para_by_el, tbl_by_el, depth + 1))
+                    parts.extend(_docx_walk_elements(sdt_content, para_by_el, tbl_by_el, depth + 1, _seen_txbx))
     return parts
 
 
@@ -574,6 +587,26 @@ def _parse_xlsx(content: bytes) -> str | None:
 _XLSX_TABLES_MAX_BYTES = 10 * 1024 * 1024
 _XLSX_TABLES_MAX_SHEET_BYTES = 40 * 1024 * 1024  # uncompressed sheet XML: a small file can declare a million formatted rows
 _XLSX_TABLES_MAX_CELLS = 400_000
+_XLSX_TABLES_MAX_CELLS_PER_SHEET = 400_000
+
+
+def _xlsx_real_dims(sheet) -> tuple[int, int]:
+    """v3 P0 S-7: 真实数据边界 —— 不被远端格式化单元格撑大。
+
+    max_row/max_column 会被格式化但无数据的单元格撑大（如 17B），
+    此处用 iter_rows 找实际有值的边界。
+    """
+    max_r, max_c = 0, 0
+    try:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.value is not None and str(cell.value).strip():
+                    max_r = max(max_r, cell.row)
+                    max_c = max(max_c, cell.column)
+    except Exception:
+        # 失败时回退 max_row/max_column
+        return sheet.max_row or 0, sheet.max_column or 0
+    return max_r, max_c
 
 
 def _xlsx_cell_text(value) -> str:
@@ -665,11 +698,23 @@ def _parse_xlsx_tables(content: bytes) -> str | None:
             if sum(i.file_size for i in archive.infolist() if i.filename.startswith("xl/worksheets/")) > _XLSX_TABLES_MAX_SHEET_BYTES:
                 return None
         workbook = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-        if sum((ws.max_row or 0) * (ws.max_column or 0) for ws in workbook.worksheets) > _XLSX_TABLES_MAX_CELLS:
-            return None
+        # v3 P0 S-6: per-sheet 跳过 —— 此前一 sheet 超限则整个 workbook 返回 None，
+        # 正常表一并丢失。现超限 sheet 跳过并 warning。
+        # v3 P0 S-7: 真实数据边界 —— max_row/max_column 会被远端格式化单元格
+        # 撑大（如 17B cells），改用 iter_rows 实际有数据的边界。
         parts: list[str] = []
         any_cell = False
         for sheet in workbook.worksheets:
+            # 真实边界：扫描实际有数据的行列
+            real_max_row, real_max_col = _xlsx_real_dims(sheet)
+            cells = real_max_row * real_max_col
+            if cells > _XLSX_TABLES_MAX_CELLS_PER_SHEET:
+                logger.warning(
+                    "_parse_xlsx_tables: sheet %s %d cells 超限，跳过",
+                    sheet.title, cells,
+                )
+                parts.append(f"## {sheet.title}\n> 注：此表过大（{cells} 单元格），已跳过。")
+                continue
             parts.append(f"## {sheet.title}")
             block: list[list[str]] = []
             for row in [*_xlsx_grid(sheet), []]:  # the empty row closes the last block

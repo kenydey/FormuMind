@@ -116,40 +116,6 @@ def cjk_ratio(text: str) -> float:
     return len(_cjk_re().findall(text)) / max(len(text), 1)
 
 
-def _vote_language(content: bytes, n_pages: int) -> str:
-    """v2 P2 M-10: 前 N 页 CJK 占比投票决定语言。"""
-    from . import pdf_local
-
-    votes = {"chi_sim": 0, "eng": 0}
-    doc = None
-    try:
-        try:
-            doc = pdf_local._open(content)
-        except Exception:
-            return "eng"
-        for page_no in range(1, n_pages + 1):
-            png = pdf_local.page_as_png(content, page_no, dpi=80, _doc=doc)
-            if not png:
-                continue
-            # 快速 OCR 一小部分判断语言（用 eng 先跑，统计 CJK）
-            text = ocr_png(png, lang="eng")
-            del png
-            if not text:
-                continue
-            cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
-            if cjk / max(len(text), 1) > 0.1:
-                votes["chi_sim"] += 1
-            else:
-                votes["eng"] += 1
-    finally:
-        if doc is not None:
-            try:
-                doc.close()
-            except Exception:
-                pass
-    return "chi_sim" if votes["chi_sim"] > votes["eng"] else "eng"
-
-
 def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | None:
     """Every page via Tesseract, assembled with page markers.
 
@@ -176,10 +142,11 @@ def ocr_pdf(content: bytes, lang: str = "eng", max_pages: int = 30) -> str | Non
         _truncated = True
         total = max_pages
 
-    # v2 P2 M-10: 多页语言投票
+    # v2 P2 M-10: lang="auto" 已废弃 —— 真实路由在 hybrid_parse 多页投票，
+    # 此处保留参数兼容，直接按 eng 处理。
     if lang == "auto":
-        lang = _vote_language(content, min(total, 3))
-        logger.info("tesseract: 多页投票语言=%s", lang)
+        logger.warning("tesseract ocr_pdf: lang='auto' 已废弃，按 eng 处理")
+        lang = "eng"
     rendered: list[tuple[int, str]] = []
     # v2 P2 M-9: 复用 PDF 句柄 —— 一次打开，多页渲染
     doc = None

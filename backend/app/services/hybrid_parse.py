@@ -426,17 +426,48 @@ def _scanned_without_cloud(content: bytes) -> str | None:
     from . import rapidocr_local, tesseract_local
 
     if tesseract_local.tesseract_available():
-        first_png = pdf_local.page_as_png(
-            content, 1, dpi=int(get_settings().rapidocr_dpi)
-        )
-        if first_png:
-            first_text, _conf = rapidocr_local.ocr_png_scored(first_png)
-            del first_png
-            if first_text and tesseract_local.cjk_ratio(first_text) < 0.1:
-                eng = tesseract_local.ocr_pdf(content, lang="eng")
-                if eng:
-                    logger.info("hybrid: scanned document read by Tesseract (English)")
-                    return eng
+        # v3 P0 M-10 真修：多页投票 —— 此前只看第一页，英文封面+中文正文
+        # 会被整篇判英文。现采样前 3 页，多数投票。
+        # （删掉 tesseract_local._vote_language 死代码，路由在此处）
+        from . import pdf_local as _pl
+
+        votes_eng = 0
+        votes_chi = 0
+        doc = None
+        try:
+            try:
+                doc = _pl._open(content)
+            except Exception:
+                doc = None
+            n_sample = min(3, _pl.page_count(content))
+            for pg in range(1, n_sample + 1):
+                png = _pl.page_as_png(
+                    content, pg, dpi=int(get_settings().rapidocr_dpi), _doc=doc
+                )
+                if not png:
+                    continue
+                txt, _conf = rapidocr_local.ocr_png_scored(png)
+                del png
+                if not txt:
+                    continue
+                if tesseract_local.cjk_ratio(txt) < 0.1:
+                    votes_eng += 1
+                else:
+                    votes_chi += 1
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+        if votes_eng > votes_chi and votes_eng > 0:
+            eng = tesseract_local.ocr_pdf(content, lang="eng")
+            if eng:
+                logger.info(
+                    "hybrid: scanned document read by Tesseract (English, %d/%d 页投票)",
+                    votes_eng, votes_eng + votes_chi,
+                )
+                return eng
 
     text = rapidocr_local.ocr_pdf(content)
     if text:
