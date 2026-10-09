@@ -64,7 +64,9 @@ class TfidfStore:
             score = sum((tf[t] / length) * self._idf(t) * q_vec[t] for t in q_vec if t in tf)
             scored.append((score, ev))
         scored.sort(key=lambda s: s[0], reverse=True)
-        return [ev for score, ev in scored[:k] if score > 0] or self.docs[:k]
+        # v29 B-7: 全零分时返回空而非任意文档 —— 返回 docs[:k] 会让下游
+        # 误以为"相关"，污染引用。调用方已有 or filtered[:k] 兜底。
+        return [ev for score, ev in scored[:k] if score > 0]
 
 
 # ── Optional semantic embedding store (sentence-transformers) ────────────────
@@ -354,6 +356,33 @@ class BM25FAISSStore:
         # Top-k by hybrid score
         order = sorted(range(len(hybrid)), key=lambda i: hybrid[i], reverse=True)[:n]
         return [self.docs[i] for i in order]
+
+    def query_scored(self, text: str, k: int = 5) -> list[tuple[float, Evidence]]:
+        """v29 B-2: 返回 (hybrid分数, Evidence)，供 colbert_store 透出真实分数。
+
+        此前 colbert_store.search() 用合成排名分 (1.0 - i*0.08) 冒充分数，
+        导致 research_graph 的 colbert_min_score=0.35 绝对阈值实际变成固定砍 top-9。
+        """
+        if not self.docs:
+            return []
+
+        tokens = _bm25_tokenize(text)
+        n = min(k, len(self.docs))
+
+        if self._bm25 is not None:
+            bm25_raw = self._bm25.get_scores(tokens)
+            bm25_scores = _minmax_norm(bm25_raw)
+        else:
+            bm25_scores = [0.5] * len(self.docs)
+
+        faiss_scores = _faiss_scores(self._faiss_index, self._faiss_dim,
+                                     self._embedder, text, len(self.docs))
+
+        w = self._resolved_bm25_weight()
+        hybrid = [w * b + (1 - w) * f for b, f in zip(bm25_scores, faiss_scores)]
+
+        order = sorted(range(len(hybrid)), key=lambda i: hybrid[i], reverse=True)[:n]
+        return [(hybrid[i], self.docs[i]) for i in order]
 
     # ── FAISS index builder (internal) ───────────────────────────────────
 

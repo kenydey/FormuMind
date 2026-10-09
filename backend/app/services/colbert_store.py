@@ -156,6 +156,10 @@ def _save_registry(settings: Settings, collection: str, registry: dict[str, Evid
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {k: v.model_dump() for k, v in registry.items()}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # v29 B-1: 写时失效 —— _STORE_CACHE 的指纹只含 doc_id 不含内容，
+    # 不清缓存会导致文档更新后 search() 返回过期旧内容。
+    with _STORE_CACHE_LOCK:
+        _STORE_CACHE.clear()
 
 
 def _get_ragatouille_model(settings: Settings):
@@ -191,7 +195,22 @@ def index_documents(
                 snippet=doc.text[:500],
                 relevance=0.5,
             )
-            registry[doc.doc_id] = ev
+            # v29 B-3: doc_id 唯一性 —— 直接覆盖会导致同名文档静默丢失。
+            # 已存在且内容不同时追加后缀保证唯一。
+            doc_id = doc.doc_id
+            if doc_id in registry:
+                existing = registry[doc_id]
+                if existing.snippet != ev.snippet or existing.title != ev.title:
+                    n = 2
+                    while f"{doc_id}#{n}" in registry:
+                        n += 1
+                    doc_id = f"{doc_id}#{n}"
+                    logger.warning(
+                        "doc_id 碰撞 '%s' → 重命名为 '%s'",
+                        doc.doc_id,
+                        doc_id,
+                    )
+            registry[doc_id] = ev
 
         backend = active_backend(settings)
         if backend == "colbert":
@@ -296,7 +315,9 @@ def search(
     """Search the knowledge index; returns ranked hits with scores."""
     settings = settings or get_settings()
     collection = collection or settings.colbert_collection
-    k = k or settings.colbert_top_k
+    # v29 B-11: k 钳制 —— API 层有 le=1000 保护，但直接调用 search() 时无上限，
+    # k=10**9 会全量返回。统一钳制到 1000。
+    k = min(k or settings.colbert_top_k, 1000)
 
     registry = _load_registry(settings, collection)
     if not registry:
@@ -347,10 +368,20 @@ def search(
         settings, collection, filtered,
         source_types_key=",".join(sorted(source_types)) if source_types else "",
     )
-    ranked = store.query(query, k=min(k, len(filtered))) or filtered[:k]
-    for i, ev in enumerate(ranked):
+    # v29 B-2: 用真实 hybrid 分数而非合成排名分。
+    # 此前 score = max(0.1, 1.0 - i*0.08) 与内容无关，导致下游
+    # research_graph 的 colbert_min_score=0.35 阈值实际变成固定砍 top-9。
+    if hasattr(store, "query_scored"):
+        scored = store.query_scored(query, k=min(k, len(filtered)))
+        ranked = [(s, ev) for s, ev in scored]
+    else:
+        ranked = [(max(0.1, 1.0 - i * 0.08), ev)
+                  for i, ev in enumerate(store.query(query, k=min(k, len(filtered))))]
+    if not ranked:
+        ranked = [(0.5, ev) for ev in filtered[:k]]
+    for score, ev in ranked:
         doc_id = _doc_id_for_evidence(ev)
-        score = max(0.1, 1.0 - i * 0.08)
+        score = min(1.0, max(0.0, float(score)))
         hits.append(
             ColbertSearchHit(
                 doc_id=doc_id,
