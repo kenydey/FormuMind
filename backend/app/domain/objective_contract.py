@@ -120,8 +120,23 @@ def normalize_objective(obj: ObjectiveSpec) -> ObjectiveSpec:
         data["unit"] = default_unit(data["metric"])
     direction = data.get("direction") or "maximize"
     if direction not in ("maximize", "minimize", "match_target"):
-        direction = "maximize"
+        # v29 M-6: 非法 direction 不再静默转 maximize（曾导致 leaderboard 倒置），
+        # 直接 422 让调用方修正。
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            422,
+            f"非法 direction: {direction!r}，仅支持 maximize/minimize/match_target",
+        )
     data["direction"] = direction
+    # v29 M-8: match_target 必须带 target_value，否则静默按 maximize 算分。
+    if direction == "match_target" and data.get("target_value") is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            422,
+            f"direction=match_target 时必须提供 target_value (metric={data.get('metric')})",
+        )
     return ObjectiveSpec(**data)
 
 
