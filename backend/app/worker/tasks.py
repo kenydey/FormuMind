@@ -820,63 +820,93 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
     from ..services.ingestion import ingest_files_batch
 
     from pathlib import Path
+    import hashlib
 
-    files: list[tuple[str, bytes]] = []
-    for item in payload.get("files") or []:
-        path = Path(item["path"])
-        try:
-            files.append((item["name"], path.read_bytes()))
-        except OSError as exc:
-            logger.warning("file ingest: cannot read %s (%s)", path, exc)
+    # v3 P1 H-6 full: streaming pipeline — read → hash → dedup → ingest →
+    # release, one file at a time. Peak memory = single file, not the batch.
+    #
+    # Root cause of the old 800MB peak: the `files` list held ALL bytes until
+    # return; ingestion.py's `del content` only dropped the loop-local name
+    # while the list kept every reference alive (M-15 was a no-op).
+    # Now each file goes through ingest_files_batch as a single-item batch
+    # (reusing all its merge/error handling), then `del content` truly frees.
+    file_items = list(payload.get("files") or [])
+    total_files = len(file_items)
 
-    # v2 H-6: 批量内存预警 —— 全部文件常驻内存，大批量时预警。
-    # 完整流式化（读→哈希→处理→释放）需重构 dedup 链路，列为 P1。
-    total_mb = sum(len(c) for _, c in files) / (1024 * 1024)
-    if total_mb > 100:
-        logger.warning(
-            "file ingest: 批量 %d 文件共 %.0fMB 常驻内存，建议分批上传",
-            len(files), total_mb,
-        )
-
-    # Content-hash dedup before parsing. The row's ``content_hash`` is taken
-    # over the *extracted text*, which is only known after a parse (minutes of
-    # OCR on a scan), so uploads are keyed by ``upload:sha256:<bytes>`` in
-    # ``origin_url`` instead — the same column already used to avoid
-    # re-downloading a fetched document. A retry then costs one hash, not a
-    # second OCR pass and a duplicate source_documents row.
     duplicates: list[str] = []
     duplicate_source_ids: dict[str, str] = {}
-    origin_url_by_name: dict[str, str] = {}
-    try:
-        import hashlib
+    all_evidence: list = []
+    all_warnings: list[str] = []
+    files_processed = 0
+    last_source_id = None
+    last_extraction_status = "skipped"
 
+    # Dedup store: fetched once; a failure skips dedup, never blocks ingest.
+    try:
         from ..db.source_store import get_source_store
 
-        store = get_source_store()
-        fresh: list[tuple[str, bytes]] = []
-        for name, content in files:
-            digest = hashlib.sha256(content).hexdigest()
-            key = f"upload:sha256:{digest}"
-            origin_url_by_name[name] = key
-            # Only a row we actually *have* makes this a duplicate. A row whose
-            # last ingest failed (0 chunks, parse error, ...) is a retry
-            # candidate — ``ingest_file`` revives it in place — otherwise the
-            # file could never be re-ingested and the UI would claim it is
-            # "already in the library" when it is not.
-            existing = store.find_by_origin_url(key, include_failed=False)
-            if existing:
-                logger.info("file ingest: duplicate upload skipped: %s (%s)", name, key)
-                duplicates.append(name)
-                duplicate_source_ids[name] = existing.id
-                continue
-            fresh.append((name, content))
-        files = fresh
-    except Exception as exc:  # dedup must never block an ingest
-        degrade_return(logger, exc, "file ingest dedup skipped", None)
+        _store = get_source_store()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("file ingest: dedup store unavailable, dedup skipped (%s)", exc)
+        _store = None
 
-    if not files:
-        # Every file was already in the library: finishing cleanly with zero
-        # evidence is the honest answer, and the UI reports it as a skip
+    for idx, item in enumerate(file_items, 1):
+        name = item["name"]
+        path = Path(item["path"])
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            logger.warning("file ingest: cannot read %s (%s)", path, exc)
+            continue
+
+        # Content-hash dedup (per-file). Key semantics unchanged:
+        # `upload:sha256:<bytes>`; a row whose last ingest failed stays a
+        # retry candidate (include_failed=False), otherwise a file could
+        # never be re-ingested.
+        digest = hashlib.sha256(content).hexdigest()
+        key = f"upload:sha256:{digest}"
+        try:
+            existing = (
+                _store.find_by_origin_url(key, include_failed=False)
+                if _store is not None
+                else None
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("file ingest: dedup check failed for %s (%s)", name, exc)
+            existing = None
+        if existing:
+            logger.info("file ingest: duplicate upload skipped: %s (%s)", name, key)
+            duplicates.append(name)
+            duplicate_source_ids[name] = existing.id
+            del content
+            continue
+
+        publish_progress(
+            task_id,
+            TaskProgressStatus.RUNNING,
+            stage="ingest",
+            message=f"解析 [{idx}/{total_files}] {name}…",
+            progress=(idx - 1) / max(total_files, 1),
+        )
+        try:
+            outcome = ingest_files_batch(
+                [(name, content)], origin_url_by_name={name: key}
+            )
+        finally:
+            # Truly release this file's bytes (the single-item list dies
+            # with the call frame).
+            del content
+
+        all_evidence.extend(outcome.evidence)
+        all_warnings.extend(f"{name}：{w}" for w in (outcome.warnings or []))
+        files_processed += 1
+        if outcome.source_id:
+            last_source_id = outcome.source_id
+        last_extraction_status = outcome.extraction_status
+
+    if files_processed == 0:
+        # Every file was a duplicate (or unreadable): finishing cleanly with
+        # zero evidence is the honest answer, and the UI reports it as a skip
         # instead of the old "入库失败" that a retry used to produce.
         result = {
             "evidence": [],
@@ -900,29 +930,28 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
     publish_progress(
         task_id,
         TaskProgressStatus.RUNNING,
-        stage="ingest",
-        message=f"解析 {len(files)} 个文件…",
-        progress=0.0,
+        stage="index",
+        message="建立检索索引…",
+        progress=0.95,
     )
     try:
-        outcome = ingest_files_batch(files, origin_url_by_name=origin_url_by_name)
         # P0-1: "skipped" 仅=无真实文本（see api/ingest.py）。
-        if outcome.extraction_status != "skipped":
-            colbert_store.index_evidence(outcome.evidence)
+        if last_extraction_status != "skipped":
+            colbert_store.index_evidence(all_evidence)
         result = {
-            "evidence": [e.model_dump() for e in outcome.evidence],
-            "total": len(outcome.evidence),
-            "files_processed": len(files),
-            "source_id": outcome.source_id,
-            "extraction_status": outcome.extraction_status,
+            "evidence": [e.model_dump() for e in all_evidence],
+            "total": len(all_evidence),
+            "files_processed": files_processed,
+            "source_id": last_source_id,
+            "extraction_status": last_extraction_status,
             "duplicates": duplicates,
             "duplicate_source_ids": duplicate_source_ids,
             # P2: 解析截断等提示 —— 前端上传完成态展示。
-            "warnings": list(outcome.warnings or []),
+            "warnings": all_warnings,
         }
         message = (
-            f"文件入库完成：{len(outcome.evidence)} 条"
-            if outcome.evidence
+            f"文件入库完成：{len(all_evidence)} 条"
+            if all_evidence
             else "文件入库完成（未提取到文本）"
         )
         if duplicates:
