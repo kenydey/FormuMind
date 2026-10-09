@@ -345,9 +345,11 @@ class Settings(BaseSettings):
     # v7: search_rerank_top_k 已删除（死开关，全仓库零读取）。
     search_rerank_llm_batch: int = 50    # 送入 LLM 评分的候选数（控制成本）
     # P1 #15: cross-encoder rerank (sentence-transformers CrossEncoder).
-    # Default OFF — model download is heavy; enable when embedding extra is installed.
+    # v29 Phase5: 默认启用 —— bge-reranker-base 已在本地缓存时自动使用，
+    # 未缓存时回退 LLM（rag.py 的 cross_encoder_model_cached 保护），
+    # 避免生产首次查询触发 ~1GB 下载。
     # Backend: auto prefers cross_encoder when enabled+available, else LLM.
-    cross_encoder_rerank_enabled: bool = False
+    cross_encoder_rerank_enabled: bool = True
     cross_encoder_model: str = "BAAI/bge-reranker-base"
     search_rerank_backend: str = "auto"  # auto | cross_encoder | llm
 

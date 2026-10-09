@@ -700,6 +700,26 @@ def cross_encoder_available() -> bool:
         return False
 
 
+def cross_encoder_model_cached(model_name: str | None = None) -> bool:
+    """v29 Phase5: 检查 reranker 模型是否已在本地缓存，避免生产意外下载。
+
+    默认启用 cross-encoder 时，只在模型已缓存时使用；未缓存则回退 LLM，
+    避免首次查询触发 ~1GB 下载阻塞。
+    """
+    from ..config import get_settings
+
+    name = (model_name or get_settings().cross_encoder_model or "").strip()
+    if not name:
+        return False
+    # 检查 HF cache 目录
+    import os
+
+    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+    # HF hub 目录命名：models--{org}--{model}
+    safe = "models--" + name.replace("/", "--")
+    return os.path.isdir(os.path.join(cache_dir, safe))
+
+
 def _load_cross_encoder(name: str):
     if name not in _CE_CACHE:
         from sentence_transformers import CrossEncoder
@@ -807,7 +827,12 @@ def rerank_scored(
     want_ce = backend == "cross_encoder" or (
         backend == "auto" and bool(settings.cross_encoder_rerank_enabled)
     )
-    if want_ce and cross_encoder_available():
+    # v29 Phase5: 默认启用时，只在模型已缓存时用 cross-encoder，
+    # 避免生产首次查询触发大模型下载。显式指定 backend=cross_encoder 时仍尝试加载。
+    _ce_ok = cross_encoder_available() and (
+        backend == "cross_encoder" or cross_encoder_model_cached()
+    )
+    if want_ce and _ce_ok:
         items, applied = rerank_cross_encoder_scored(query, candidates, k=k)
         if applied:
             return items, {
