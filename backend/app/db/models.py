@@ -187,6 +187,8 @@ class Campaign(Base):
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     owner_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True, default=None)
     primary_metric: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # v29 H-5: domain stored at creation (was hardcoded to anticorrosion_coating)
+    domain: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     objectives_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     lever_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -51,10 +51,22 @@ def should_trigger_loop_after_sync(
 
 
 def requirement_from_campaign(campaign: Any) -> Requirement:
-    """Rebuild a minimal Requirement from frozen campaign metadata."""
+    """Rebuild a minimal Requirement from frozen campaign metadata.
+
+    v29 H-5: domain read from campaign (was hardcoded to anticorrosion_coating).
+    Falls back to anticorrosion_coating for old campaigns without domain.
+    """
     from ..domain.objective_contract import objectives_from_snapshot
 
-    domain = ProductDomain.anticorrosion_coating
+    # Read domain from campaign, fallback for old rows
+    domain_val = getattr(campaign, "domain", None)
+    if domain_val:
+        try:
+            domain = ProductDomain(domain_val)
+        except ValueError:
+            domain = ProductDomain.anticorrosion_coating
+    else:
+        domain = ProductDomain.anticorrosion_coating
     objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
     levers: list[LeverSpec] = []
     for item in campaign.lever_snapshot or []:

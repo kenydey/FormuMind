@@ -187,7 +187,14 @@ def row_to_experiment_record(
 
 
 def _campaign_domain(campaign: Campaign) -> ProductDomain:
-    # Campaign metadata does not store domain; anticorrosion is the primary use case.
+    # v29 H-5: domain now stored on campaign (was hardcoded).
+    # Falls back to anticorrosion_coating for old rows.
+    domain_val = getattr(campaign, "domain", None)
+    if domain_val:
+        try:
+            return ProductDomain(domain_val)
+        except ValueError:
+            pass
     return ProductDomain.anticorrosion_coating
 
 

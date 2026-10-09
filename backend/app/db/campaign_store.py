@@ -230,6 +230,8 @@ class _CampaignMetaMixin:
                     project_id=project_id,
                     owner_id=owner_id,
                     primary_metric=primary,
+                    # v29 H-5: persist domain (was hardcoded on read)
+                    domain=domain.value if hasattr(domain, "value") else str(domain),
                     objectives_snapshot=[o.model_dump() for o in objectives],
                     lever_snapshot=lever_snapshot,
                     sample_refs=[],
@@ -684,7 +686,15 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        domain = ProductDomain.anticorrosion_coating
+        # v29 H-5: domain from campaign (was hardcoded)
+        domain_val = getattr(campaign, "domain", None)
+        if domain_val:
+            try:
+                domain = ProductDomain(domain_val)
+            except ValueError:
+                domain = ProductDomain.anticorrosion_coating
+        else:
+            domain = ProductDomain.anticorrosion_coating
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
         ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
         updated = 0
@@ -941,7 +951,15 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        domain = ProductDomain.anticorrosion_coating
+        # v29 H-5: domain from campaign (was hardcoded)
+        domain_val = getattr(campaign, "domain", None)
+        if domain_val:
+            try:
+                domain = ProductDomain(domain_val)
+            except ValueError:
+                domain = ProductDomain.anticorrosion_coating
+        else:
+            domain = ProductDomain.anticorrosion_coating
         objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
 
         refs = list(campaign.sample_refs or [])
