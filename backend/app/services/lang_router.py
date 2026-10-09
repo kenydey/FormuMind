@@ -68,7 +68,13 @@ def model_for_lang(lang: str | None) -> str:
     """子库对应嵌入模型(与 rag.embed_model_name 的 lang 分支一致)。
 
     中文子库 → bge-small-zh-v1.5; 英文/未知 → all-MiniLM-L6-v2。
+    v29 Phase2: 统一多语言空间时（FORMUMIND_EMBEDDING_MODEL 已配置），
+    直接返回配置的模型，不再按语言分流。
     """
+    from .rag import embed_model_name, embedding_space_unified
+
+    if embedding_space_unified():
+        return embed_model_name()
     if lang == "zh":
         return "BAAI/bge-small-zh-v1.5"
     return "sentence-transformers/all-MiniLM-L6-v2"

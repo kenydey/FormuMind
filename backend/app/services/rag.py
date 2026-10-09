@@ -415,12 +415,17 @@ class BM25FAISSStore:
 
         v29 P0-1: 用模块级 _load_model 缓存 —— 此前每次新建 BM25FAISSStore
         都从头加载模型（1-3 秒/次），colbert_store.search() 每次都新建 store。
+
+        v29 Phase2 B-9: 按配置路由模型而非硬编码 MiniLM ——
+        FORMUMIND_EMBEDDING_MODEL=bge-m3 时自动用统一多语言向量空间。
         """
         if self._embedder is False:
             return None
         if self._embedder is None:
             try:
-                self._embedder = _load_model("all-MiniLM-L6-v2")
+                # 按配置/语言路由；未配置时默认 MiniLM（向后兼容）
+                model_name = embed_model_name()
+                self._embedder = _load_model(model_name)
             except Exception as exc:
                 logger.warning(
                     "sentence-transformers unavailable — FAISS disabled, BM25 only (%s)",
