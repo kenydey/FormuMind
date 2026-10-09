@@ -220,6 +220,11 @@ def _ingest_parsed_text(
             log_handled_exception(logger, exc, "index_source hard fail — deleting orphan source")
             try:
                 store.delete(source_id)
+                # v29 P0-2: 级联删除 chunks —— store.delete 只删 SourceDocument 行，
+                # 不删已写入的 chunks，会留下污染检索的孤儿行。
+                from ..db.chunk_store import get_chunk_store
+
+                get_chunk_store().delete_for_source(source_id)
             except Exception as del_exc:
                 log_handled_exception(logger, del_exc, "orphan source delete failed")
             source_id = None

@@ -383,14 +383,15 @@ class BM25FAISSStore:
 
         Never invents random vectors: a missing embedding package must degrade
         to pure BM25 (FAISS index stays None), not BM25 + noise.
+
+        v29 P0-1: 用模块级 _load_model 缓存 —— 此前每次新建 BM25FAISSStore
+        都从头加载模型（1-3 秒/次），colbert_store.search() 每次都新建 store。
         """
         if self._embedder is False:
             return None
         if self._embedder is None:
             try:
-                from sentence_transformers import SentenceTransformer
-
-                self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+                self._embedder = _load_model("all-MiniLM-L6-v2")
             except Exception as exc:
                 logger.warning(
                     "sentence-transformers unavailable — FAISS disabled, BM25 only (%s)",

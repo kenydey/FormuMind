@@ -28,6 +28,12 @@ SourceType = Literal["patents", "literature", "internet", "local", "notebooklm"]
 _LOCK = threading.Lock()
 _MODEL_CACHE: dict[str, object] = {}
 
+# v29 P0-1: 常驻检索器缓存 —— search() 每次重建 BM25 索引是秒级浪费。
+# key: (collection, registry mtime_ns, doc_count, source_types_key)。
+# index_evidence 写 registry 后 mtime 变化，缓存自动失效。
+_STORE_CACHE: dict[tuple, object] = {}
+_STORE_CACHE_LOCK = threading.Lock()
+
 
 class ColbertDocMetadata(BaseModel):
     source_type: SourceType = "literature"
@@ -241,6 +247,44 @@ def index_evidence(
     return manifest.doc_count
 
 
+def _registry_fingerprint(settings: Settings, collection: str, registry: dict) -> tuple:
+    """v29 P0-1: registry 指纹，用于常驻检索器缓存失效。"""
+    try:
+        path = _evidence_registry_path(settings, collection)
+        mtime = path.stat().st_mtime_ns if path.exists() else 0
+    except Exception:
+        mtime = 0
+    return (collection, mtime, len(registry))
+
+
+def _get_cached_store(
+    settings: Settings,
+    collection: str,
+    filtered: list,
+    source_types_key: str,
+) -> object:
+    """v29 P0-1: 获取或构建常驻检索器。registry 未变时复用，避免每次重建。"""
+    # 指纹需要 registry，这里用 filtered 的长度 + collection 作为近似；
+    # 精确指纹在调用方计算后传入。简化：用 filtered 的 id 列表哈希。
+    import hashlib
+
+    doc_ids = sorted(_doc_id_for_evidence(ev) for ev in filtered)
+    fp = hashlib.md5("|".join(doc_ids).encode()).hexdigest()[:16]
+    key = (collection, fp, source_types_key, len(filtered))
+    with _STORE_CACHE_LOCK:
+        store = _STORE_CACHE.get(key)
+    if store is not None:
+        return store
+    store = rag.build_store()
+    store.ingest(filtered)
+    with _STORE_CACHE_LOCK:
+        # 防止缓存无限增长：只保留最近 8 个
+        if len(_STORE_CACHE) >= 8:
+            _STORE_CACHE.pop(next(iter(_STORE_CACHE)))
+        _STORE_CACHE[key] = store
+    return store
+
+
 def search(
     query: str,
     k: int | None = None,
@@ -299,8 +343,10 @@ def search(
         except Exception as exc:
             logger.warning("ColBERT search failed, falling back to rag store: %s", exc)
 
-    store = rag.build_store()
-    store.ingest(filtered)
+    store = _get_cached_store(
+        settings, collection, filtered,
+        source_types_key=",".join(sorted(source_types)) if source_types else "",
+    )
     ranked = store.query(query, k=min(k, len(filtered))) or filtered[:k]
     for i, ev in enumerate(ranked):
         doc_id = _doc_id_for_evidence(ev)

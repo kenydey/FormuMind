@@ -62,7 +62,9 @@ _DEFAULT_OBJECTIVES: dict[ProductDomain, list[ObjectiveSpec]] = {
 
 
 def default_objectives(domain: ProductDomain) -> list[ObjectiveSpec]:
-    return _DEFAULT_OBJECTIVES[domain]
+    """v29 P0-3: 返回深拷贝 —— _DEFAULT_OBJECTIVES 是模块级 live list，
+    直接返回会让调用方的 append()/weight 修改污染全局默认值。"""
+    return [o.model_copy(deep=True) for o in _DEFAULT_OBJECTIVES[domain]]
 
 
 def process_for(req: Requirement) -> dict:
