@@ -17,6 +17,7 @@ import logging
 from .errors import log_handled_exception
 import math
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -124,14 +125,30 @@ _EMBED_MODEL_ZH = "BAAI/bge-small-zh-v1.5"
 _BGE_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
 
+# v29: 运行时模型覆盖（UI 切换用，优先级高于 env var）
+_RUNTIME_MODEL_OVERRIDE: str | None = None
+_RUNTIME_MODEL_LOCK = threading.Lock()
+
+
+def set_runtime_embedding_model(model_id: str | None) -> None:
+    """UI 切换 embedding 模型时调用，运行时生效（进程级）。"""
+    global _RUNTIME_MODEL_OVERRIDE
+    with _RUNTIME_MODEL_LOCK:
+        _RUNTIME_MODEL_OVERRIDE = (model_id or "").strip() or None
+
+
 def embed_model_name(lang: str | None = None) -> str:
     """按子库语言返回嵌入模型; lang=None 保持现状(全局配置优先)。
 
-    显式配置(FORMUMIND_EMBEDDING_MODEL)总是优先——它代表操作者明确选择;
+    优先级：运行时覆盖（UI 切换）> FORMUMIND_EMBEDDING_MODEL > 按语言默认。
     未配置时: zh 子库 → bge-small-zh-v1.5, en/其他 → MiniLM。
     """
     from ..config import get_settings
 
+    with _RUNTIME_MODEL_LOCK:
+        runtime = _RUNTIME_MODEL_OVERRIDE
+    if runtime:
+        return runtime
     configured = (get_settings().embedding_model or "").strip()
     if configured:
         return configured

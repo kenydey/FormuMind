@@ -7,6 +7,7 @@ import EnvFlagsPanel from "./EnvFlagsPanel";
 import ParseProfileSelector from "./ParseProfileSelector";
 import ApiAccessPanel, { isAuthError } from "./ApiAccessPanel";
 import VisionModelPanel from "./VisionModelPanel";
+import EmbeddingModelPanel from "./EmbeddingModelPanel";
 import FormulationModeSelector from "./FormulationModeSelector";
 import WikiChatModeSelector from "./WikiChatModeSelector";
 import OcsrPanel from "./OcsrPanel";
@@ -380,6 +381,8 @@ export default function SettingsModal() {
             vision={vision}
             onSaved={() => void loadLlmSettings()}
           />
+
+          <EmbeddingModelPanel />
 
           <div className="flex justify-end border-t border-edge pt-3">
             <button

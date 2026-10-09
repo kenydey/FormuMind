@@ -117,6 +117,53 @@ cd "$ROOT/backend"
 echo "    数据库已就绪"
 
 echo ""
+echo "==> [4.5/5] Embedding 模型选择"
+echo "    选择向量模型（影响中英文检索质量）："
+echo "    1) MiniLM-L6-v2 (默认, 90MB, 英文优先, 轻量)"
+echo "    2) bge-small-zh-v1.5 (100MB, 中文)"
+echo "    3) bge-m3 (推荐, ~2GB, 多语言, 解决跨语言召回)"
+echo "    4) Qwen3-Embedding-0.6B (~1.2GB, 多语言)"
+echo "    5) m3e-base (~200MB, 中文)"
+if [ "$ASSUME_YES" = "1" ]; then
+  EMB_CHOICE="1"
+  echo "    全自动模式：使用默认 MiniLM-L6-v2"
+else
+  read -rp "    请选择 [1-5, 默认1]: " EMB_CHOICE
+  EMB_CHOICE="${EMB_CHOICE:-1}"
+fi
+case "$EMB_CHOICE" in
+  1) EMB_MODEL="sentence-transformers/all-MiniLM-L6-v2" ;;
+  2) EMB_MODEL="BAAI/bge-small-zh-v1.5" ;;
+  3) EMB_MODEL="BAAI/bge-m3" ;;
+  4) EMB_MODEL="Qwen/Qwen3-Embedding-0.6B" ;;
+  5) EMB_MODEL="moka-ai/m3e-base" ;;
+  *) EMB_MODEL="sentence-transformers/all-MiniLM-L6-v2" ;;
+esac
+# 写入 .env
+if grep -q "^FORMUMIND_EMBEDDING_MODEL=" "$ROOT/.env" 2>/dev/null; then
+  sed -i.bak "s|^FORMUMIND_EMBEDDING_MODEL=.*|FORMUMIND_EMBEDDING_MODEL=$EMB_MODEL|" "$ROOT/.env"
+else
+  echo "FORMUMIND_EMBEDDING_MODEL=$EMB_MODEL" >> "$ROOT/.env"
+fi
+echo "    已选择: $EMB_MODEL"
+# 大模型二次确认并下载
+if [[ "$EMB_MODEL" == "BAAI/bge-m3" || "$EMB_MODEL" == "Qwen/Qwen3-Embedding-0.6B" ]]; then
+  if [ "$ASSUME_YES" = "0" ]; then
+    read -rp "    模型约 1-2GB，是否现在下载？[y/N] " dl_ans
+    if [[ "$dl_ans" =~ ^[Yy]$ ]]; then
+      echo "    下载中..."
+      "$ROOT/backend/.venv/bin/python" -c "
+from huggingface_hub import snapshot_download
+snapshot_download('$EMB_MODEL', allow_patterns=['*.json','*.txt','*.model','*.safetensors','*.bin'])
+print('    下载完成')
+"
+    else
+      echo "    已跳过下载，首次使用时自动下载"
+    fi
+  fi
+fi
+
+echo ""
 echo "==> [5/5] 完成 ✅"
 echo ""
 echo "  后端 API:    cd backend && source .venv/bin/activate && uvicorn app.main:app --port 8000"

@@ -68,6 +68,9 @@ services:
       FORMUMIND_REDIS_URL: redis://redis:6379/0
       FORMUMIND_CELERY_EAGER: "false"
       FORMUMIND_COLBERT_INDEX_DIR: /app/data/colbert_index
+      # v29: Embedding 模型选择（5 选 1，见 install.sh / Settings UI）。
+      # 默认 MiniLM（轻量）；bge-m3（多语言推荐，需 ~2GB 下载）。
+      FORMUMIND_EMBEDDING_MODEL: ${FORMUMIND_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       # Platform bearer auth (distinct from LLM vendor keys in Settings).
       # Intranet lab default OFF. Production ELN compose defaults ON
       # (see docker-compose.eln.yml :-true).
