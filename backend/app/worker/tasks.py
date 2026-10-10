@@ -1531,6 +1531,8 @@ def run_doe_cycle_task(self, payload: dict) -> dict:
             requirement,
             budget_remaining=payload.get("budget_remaining"),
             seed=payload.get("seed"),
+            # P1-1: 透传 campaign_id，生成的实验可关联到 workbench campaign
+            workbench_campaign_id=campaign_id,
         )
 
         tracker.emit(

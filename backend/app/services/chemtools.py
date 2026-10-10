@@ -773,6 +773,26 @@ def review_doe_factors(req: Any, plan: Any) -> list[str]:
                 "化学审查：材料含环氧基与胺基（反应对），当前设计未包含固化温度/时间因子，"
                 "建议纳入以捕获固化动力学交互效应"
             )
+    # P1-7: 危险工艺条件软阈值警告（advisory，不阻塞）
+    for f in getattr(plan, "factors", []) or []:
+        _fname = (getattr(f, "name", "") or "").lower()
+        _high = getattr(f, "high", None)
+        try:
+            _hv = float(_high) if _high is not None else None
+        except (TypeError, ValueError):
+            _hv = None
+        if _hv is None:
+            continue
+        if any(k in _fname for k in ("温度", "temp")) and _hv > 200:
+            notes.append(
+                f"工艺安全：因子 {getattr(f, 'name', '')} 上限 {_hv}°C 超过 200°C，"
+                f"请确认设备安全范围"
+            )
+        elif any(k in _fname for k in ("压力", "pressure")) and _hv > 5:
+            notes.append(
+                f"工艺安全：因子 {getattr(f, 'name', '')} 上限 {_hv} bar 超过 5 bar，"
+                f"请确认设备安全范围"
+            )
     return notes
 
 

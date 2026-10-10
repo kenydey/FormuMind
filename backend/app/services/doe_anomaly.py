@@ -90,9 +90,15 @@ def detect_anomalies(
             continue
 
         mean, std = _surrogate_score(exp.factors or {}, req.domain, existing[:idx] + existing[idx + 1 :], metric)
-        if std > 1e-6:
-            z = abs(actual - mean) / std
-            if z > _RESIDUAL_Z_THRESHOLD:
+        # P1-4: 小样本保护 —— n<10 时 std 估计不可靠，z 阈值放宽到 3.5，
+        # 且 std 加相对地板（避免干净数据下 z 虚高导致误杀风暴）
+        _n = len(existing)
+        _z_thresh = 3.5 if _n < 10 else _RESIDUAL_Z_THRESHOLD
+        _std_floor = 0.05 * (abs(mean) + 1e-6)
+        _std_eff = max(std, _std_floor)
+        if _std_eff > 1e-6:
+            z = abs(actual - mean) / _std_eff
+            if z > _z_thresh:
                 severity = "critical" if z > 4.0 else "warning"
                 flags.append(
                     AnomalyFlag(

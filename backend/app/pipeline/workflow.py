@@ -329,9 +329,16 @@ def build_doe(
         plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(review)
     # Persistent-KB parameter-space fusion: advisory literature envelopes for
     # factors documented in stored source guides (never mutates bounds).
+    # P2-3: advisory 不应击穿主链路 —— DB 异常时降级跳过
     from ..services import kb_index
 
-    kb_hints = kb_index.doe_parameter_hints([f.name for f in plan.factors])
+    try:
+        kb_hints = kb_index.doe_parameter_hints([f.name for f in plan.factors])
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("doe_parameter_hints skipped: %s", exc)
+        kb_hints = []
     if kb_hints:
         plan.notes = (plan.notes + "\n" if plan.notes else "") + "\n".join(kb_hints)
     _cache_plan(plan)

@@ -449,6 +449,13 @@ class BaybeCampaignEngine:
             _src_counts[_s] = _src_counts.get(_s, 0) + 1
         # v13-3: workbench 真实测量也计入 lab 点数。
         _lab_n = sum(n for s, n in _src_counts.items() if s in REAL_SOURCES)
+        # P1-5: 纯虚拟优化警告 —— 零 lab 数据时 GP 只吃 predictor 自己的输出，
+        # "收敛"仅反映预测器内部一致性，未经现实检验
+        if _lab_n == 0:
+            log.warning(
+                "baybe: 纯虚拟优化（0 lab 数据点）——结果仅反映预测器内部一致性，"
+                "未经过实测验证，请谨慎用于实验安排"
+            )
         # v14-3: 虚拟口径用 VIRTUAL_SOURCES（workbench 不再被双计入）；
         # v18-1: baybe_opt 已进 GP，不再计入"被排除"。
         # 未知 source 单独计数披露，防未来新增类型静默归类错误。

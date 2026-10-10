@@ -85,6 +85,13 @@ def generate_doe(
     except ValueError as exc:
         # v9: 离散因子 + 非 full_factorial 设计 fail-closed → 422 而非 500。
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # P2-5: 极小 n 警告（n < 2k 时统计功效不足）
+    _k = len(getattr(requirement, "levers", None) or [])
+    _pn = len(plan.runs) if plan else 0
+    if _k > 0 and _pn < 2 * _k:
+        plan.notes = (plan.notes + "\n" if plan.notes else "") + (
+            f"提示：实验数 {_pn} 小于 2×因子数（{_k}），统计功效可能不足，建议增加实验数"
+        )
     _persist_doe_plan(plan, project_id=requirement.project_id or None)
     return plan
 

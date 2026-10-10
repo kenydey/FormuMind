@@ -1447,8 +1447,7 @@ async def convergence_webhook(
         payload.round_count,
         payload.message,
     )
-    # Forward to WebSocket / SSE notification system
-    # (handled by existing notification pipeline)
+    # P2-2: 当前仅记录日志（WebSocket/SSE 转发尚未实现）
     return {"status": "received", "campaign_id": str(payload.campaign_id)}
 
 

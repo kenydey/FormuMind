@@ -46,13 +46,23 @@ def _export_rows(plan: DOEPlan, headers: list[str]) -> list[list]:
     return rows
 
 
+def _sanitize_csv_cell(value) -> str:
+    """P1-6: CSV 公式注入防护 —— =+-@ 开头加单引号前缀（与配方 export.ts 对齐）。"""
+    s = str(value) if value is not None else ""
+    if s and s[0] in ("=", "+", "-", "@"):
+        return "'" + s
+    return s
+
+
 def plan_to_csv(plan: DOEPlan, metrics: list[str]) -> str:
     """Render a DOE plan as a CSV string with blank measured columns."""
-    headers = _export_headers(plan, metrics)
+    headers = [_sanitize_csv_cell(h) for h in _export_headers(plan, metrics)]
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(headers)
-    writer.writerows(_export_rows(plan, headers))
+    writer.writerows(
+        [[_sanitize_csv_cell(c) for c in row] for row in _export_rows(plan, _export_headers(plan, metrics))]
+    )
     return buf.getvalue()
 
 

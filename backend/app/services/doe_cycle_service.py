@@ -342,7 +342,11 @@ def _hold_stub(
 
 
 def run_doe_cycle(
-    requirement: Requirement, budget_remaining: int | None = None, seed: int | None = None
+    requirement: Requirement,
+    budget_remaining: int | None = None,
+    seed: int | None = None,
+    # P1-1: 透传 workbench_campaign_id，生成的实验关联到 campaign
+    workbench_campaign_id: int | None = None,
 ) -> dict[str, Any]:
     """Execute one DOE cycle for closed-loop automation.
 
@@ -443,6 +447,9 @@ def run_doe_cycle(
         result = persist_experiments(
             requirement, experiment_dicts, candidate_formulations
         )
+        # P1-1: 结果中携带 campaign_id，便于上游关联
+        if workbench_campaign_id is not None:
+            result["workbench_campaign_id"] = workbench_campaign_id
     except Exception as e:
         logger.error("Failed to save experiments: %s", e)
         _record(engine, 0, "error")

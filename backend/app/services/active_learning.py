@@ -112,7 +112,7 @@ def _known_failures(domain) -> list:
     try:
         return failure_memory.failed_records(domain)
     except Exception as exc:
-        logger.debug("active learning: failure memory unavailable ({})", exc)
+        logger.debug("active learning: failure memory unavailable (%s)", exc)
         return []
 
 
@@ -301,7 +301,7 @@ def active_learning_doe(
                     )
                 # P1 #18: package importable but engine reports unavailable.
                 logger.warning(
-                    "BayBE reported unavailable; falling back to legacy DOE (engine={})",
+                    "BayBE reported unavailable; falling back to legacy DOE (engine=%s)",
                     eng,
                 )
             except Exception as exc:
@@ -309,7 +309,7 @@ def active_learning_doe(
                     raise
                 # P1 #18: engine=auto must not swallow BayBE failures silently.
                 logger.warning(
-                    "BayBE active-learning failed, falling back to legacy DOE: {}",
+                    "BayBE active-learning failed, falling back to legacy DOE: %s",
                     exc,
                 )
 

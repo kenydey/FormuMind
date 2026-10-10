@@ -127,15 +127,20 @@ def _describe_region(natural: dict[str, float], plan: DOEPlan) -> str:
     return "、".join(parts) if parts else "未覆盖因子空间"
 
 
-def _y_best(existing: list[ExperimentRecord], metric: str) -> float:
+def _y_best(existing: list[ExperimentRecord], metric: str, direction: str = "maximize") -> float:
+    # P1-3: minimize 方向取 min（之前恒用 max，minimize 目标全错）
     if not existing:
         return 0.0
-    return max((exp.measured or {}).get(metric, 0.0) for exp in existing)
+    vals = [(exp.measured or {}).get(metric, 0.0) for exp in existing]
+    return min(vals) if direction == "minimize" else max(vals)
 
 
-def _estimate_improvement_pct(mean: float, y_best: float) -> float:
+def _estimate_improvement_pct(mean: float, y_best: float, direction: str = "maximize") -> float:
     if y_best <= 0:
         return 0.0
+    # P1-3: minimize 时改进 = (y_best - mean) / y_best
+    if direction == "minimize":
+        return max(0.0, (y_best - mean) / y_best * 100.0)
     return max(0.0, (mean - y_best) / y_best * 100.0)
 
 
@@ -164,10 +169,14 @@ def build_run_explanations(
 ) -> list[RunExplanation]:
     """Build one explanation per AI-suggested run in *plan*."""
     from .active_learning import _ei_acquisition, _surrogate_score
+    from .convergence import primary_objective_spec
 
     metric = primary_objective(req)
+    # P1-3: 取 direction，minimize 目标不再用 maximize 逻辑
+    _spec = primary_objective_spec(req)
+    direction = str(getattr(_spec, "direction", "maximize") or "maximize").lower()
     domain = plan.domain or req.domain
-    y_best = _y_best(existing, metric)
+    y_best = _y_best(existing, metric, direction)
     suggested = [r for r in plan.runs if r.ai_suggested] or plan.runs
     explanations: list[RunExplanation] = []
 
@@ -185,13 +194,13 @@ def build_run_explanations(
 
         if acq is None and domain is not None:
             mean, std = _surrogate_score(run.natural, domain, existing, metric)
-            acq = _ei_acquisition(mean, std, y_best)
+            acq = _ei_acquisition(mean, std, y_best, direction=direction)
 
         if run_strategy == "exploration" or is_sparse:
             summary = f"探索 {_describe_region(run.natural, plan)} 区域（当前数据稀疏）"
         else:
             mean, _ = _surrogate_score(run.natural, domain, existing, metric)
-            delta = _estimate_improvement_pct(mean, y_best)
+            delta = _estimate_improvement_pct(mean, y_best, direction)
             ref = "、".join(nearest_ids) if nearest_ids else "无"
             summary = f"预计 {metric} 提升约 {delta:.1f}%（参考实验：{ref}）"
 
@@ -206,7 +215,7 @@ def build_run_explanations(
                 summary=summary,
                 nearest_experiment_ids=nearest_ids,
                 predicted_delta_pct=None if run_strategy == "exploration" else _estimate_improvement_pct(
-                    _surrogate_score(run.natural, domain, existing, metric)[0], y_best
+                    _surrogate_score(run.natural, domain, existing, metric)[0], y_best, direction
                 ),
                 acquisition_score=round(acq, 4) if acq is not None else None,
                 constraint_warnings=cw,
@@ -245,6 +254,8 @@ def legacy_acquisition_scores(
     *,
     n_suggest: int,
     objective_metric: str | None = None,
+    # P1-3: direction 参数，minimize 目标不再用 maximize EI
+    direction: str = "maximize",
 ) -> dict[int, float]:
     """Recompute EI scores for legacy active-learning suggested runs."""
     from ..pipeline.workflow import OBJECTIVE
@@ -253,11 +264,11 @@ def legacy_acquisition_scores(
     if plan.domain is None:
         return {}
     obj_metric = objective_metric or OBJECTIVE.get(plan.domain, "salt_spray_hours")
-    y_best = _y_best(existing, obj_metric)
+    y_best = _y_best(existing, obj_metric, direction)
     scores: dict[int, float] = {}
     for run in plan.runs:
         if not run.ai_suggested:
             continue
         mean, std = _surrogate_score(run.natural, plan.domain, existing, obj_metric)
-        scores[run.run_id] = _ei_acquisition(mean, std, y_best)
+        scores[run.run_id] = _ei_acquisition(mean, std, y_best, direction=direction)
     return scores

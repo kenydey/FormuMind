@@ -78,7 +78,8 @@ class ObjectiveSpec(BaseModel):
 class LeverSpec(BaseModel):
     """A tunable DOE/optimization factor (ingredient wt% or process parameter)."""
 
-    name: str
+    # P2-1: name 加长度限制（纵深防御，防 CSV 注入/超长截断）
+    name: str = Field(min_length=1, max_length=100)
     low: float
     high: float
     unit: str = "wt%"
@@ -92,6 +93,9 @@ class LeverSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_kind_levels(self) -> "LeverSpec":
         _validate_factor_kind_levels(self.kind, self.levels, self.name)
+        # P1-2: 倒置边界在 API 层直接 422，不等到深层转换才报错
+        if self.low > self.high:
+            raise ValueError(f"因子 {self.name}: low ({self.low}) 不能大于 high ({self.high})")
         return self
 
 

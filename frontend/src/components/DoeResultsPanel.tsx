@@ -42,7 +42,8 @@ function R2Gauge({ value }: { value: number }) {
           fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" />
       )}
       <text x={cx} y={cy + 8} textAnchor="middle" fill={color} fontSize="9" fontFamily="monospace">
-        {(value * 100).toFixed(0)}%
+        {/* P2-1: 负值显示 N/A（表盘已归零，文字不再显示 -120%） */}
+        {value < 0 ? "N/A" : `${(pct * 100).toFixed(0)}%`}
       </text>
     </svg>
   );
