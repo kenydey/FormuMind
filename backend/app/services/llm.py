@@ -1521,6 +1521,12 @@ def recommend_formulations(
             for f in parsed.formulas[:n]
         ]
         formulas, val_warnings = validate_recommended_formulas(normalized)
+        # P1-4: 验证全灭后也 fall through 到 offline 兜底（不只看解析前数量）
+        if not formulas:
+            reason = "LLM 输出验证后无可用候选"
+            log.info("Falling back to offline recommend: %s", reason)
+            offline_forms = offline_recommend_fallback(req, n=n)
+            return offline_recommend_response(offline_forms, reason=reason)
         return RecommendedFormulaListResponse(
             formulas=formulas,
             warnings=val_warnings + parsed.warnings,

@@ -47,6 +47,8 @@ def run_recommend_orchestration(
     modify_prompt: str = "",
     base_formulas=None,
     synth_override=None,
+    # P1-1: llm_only/无证据时关闭 strict grounding（tag-only，不剔除）
+    strict_grounding: bool = True,
     settings: Settings | None = None,
 ) -> RecommendBundle:
     """Single orchestration entry for formulation recommendation.
@@ -92,6 +94,8 @@ def run_recommend_orchestration(
         rec_resp.formulas,
         evidence,
         prefer_materials_catalog=prefer_materials_catalog,
+        # P1-1: 无证据时 strict 会误删所有成分（含"水"），改用 tag-only
+        strict=strict_grounding and bool(evidence),
     )
     warnings.extend(ground_warnings)
 
@@ -177,10 +181,14 @@ def finalize_scored_formulations(
             rec.predicted = dict(f.predicted or {})
             formulas.append(rec)
 
-    # v22: 配对完整性断言（fail-fast，暴露未来重构引入的错位）。
-    assert len(formulas) == len(scored), (
-        f"recommendation pairing broken: {len(formulas)} != {len(scored)}"
-    )
+    # v22: 配对完整性检查（P2-1: assert 改显式检查，生产环境 assert 可能被 -O 剥离）
+    if len(formulas) != len(scored):
+        logger.error(
+            "recommendation pairing broken: %d != %d, truncating to shortest",
+            len(formulas), len(scored),
+        )
+        _n = min(len(formulas), len(scored))
+        formulas, scored = formulas[:_n], scored[:_n]
     return scored, formulas, dedup_notes, diversity_applied
 
 
@@ -285,6 +293,10 @@ def finalize_recommendation_bundle(
             scored.append(scored_form)
         except ValueError as exc:
             warnings.append(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            # P1-3: 单个坏候选不拖死整轮 —— predictor/网络 enrich 等非 ValueError 异常跳过该候选
+            logger.warning("recommend candidate %d skipped: %s", _ri, exc)
+            warnings.append(f"候选 {_ri} 处理失败已跳过: {type(exc).__name__}")
 
     scored, gate_warnings = validate_formulations(scored, req=req)
     warnings.extend(gate_warnings)

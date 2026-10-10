@@ -12,6 +12,13 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# P1-9: 各 metric 的物理下界（修正后钳制）。未列出的 metric 走名称启发式。
+_PHYSICAL_LOWER_BOUNDS: dict[str, float] = {
+    "salt_spray_h": 0.0,
+    "cost_cny_per_kg": 0.0,
+    "voc_gpl": 0.0,
+}
+
 
 def load_latest_bias_by_metric(
     *,
@@ -127,10 +134,33 @@ def soft_correct_predicted(
             continue
         if n < min_n:
             continue
+        # P1-10: 异方差保护 —— rmse 远大于 |mean| 说明误差不是常数偏移，
+        # 全局均值修正会恶化一侧，此时只告警不修正
+        try:
+            _rmse = float(stats.get("rmse") or 0)
+            if _rmse > 2.0 * abs(mean_err) and _rmse > 0:
+                logger.warning(
+                    "bias correction skipped for %s: heteroscedastic "
+                    "(rmse=%.3f >> |mean|=%.3f)",
+                    metric, _rmse, abs(mean_err),
+                )
+                continue
+        except (TypeError, ValueError):
+            pass
         try:
             raw = float(out[metric])
         except (TypeError, ValueError):
             continue
-        out[metric] = round(raw - mean_err, 4)
+        # P1-9: 物理下界钳制 —— 时长/浓度/百分比等 metric 修正后不能为负
+        corrected_val = raw - mean_err
+        _lower = _PHYSICAL_LOWER_BOUNDS.get(metric, None)
+        if _lower is None:
+            # 默认：已知非负物理量（时长、浓度、百分比、成本等）下界为 0
+            _lower = 0.0 if any(
+                k in metric for k in ("_h", "hour", "pct", "percent", "cost", "voc", "density", "viscosity", "concentration", "content")
+            ) else None
+        if _lower is not None and corrected_val < _lower:
+            corrected_val = _lower
+        out[metric] = round(corrected_val, 4)
         corrected.append(metric)
     return out, corrected

@@ -5,6 +5,17 @@ from ..domain.schemas import Evidence, Formulation
 
 
 def _ingredient_jaccard(a: Formulation, b: Formulation) -> float:
+    # P1-8: 权重感知回退 —— 纯名称 Jaccard 会把"同名不同比例"误判为完全重复
+    try:
+        wa = {i.name.lower(): float(i.weight_pct or 0) for i in a.ingredients if i.name}
+        wb = {i.name.lower(): float(i.weight_pct or 0) for i in b.ingredients if i.name}
+        if wa and wb:
+            # 加权相似度：名称交集的权重差异越小越相似
+            _all = set(wa) | set(wb)
+            _diff = sum(abs(wa.get(k, 0) - wb.get(k, 0)) for k in _all)
+            return max(0.0, 1.0 - _diff / 200.0)
+    except Exception:
+        pass
     sa = {i.name.lower() for i in a.ingredients if i.name}
     sb = {i.name.lower() for i in b.ingredients if i.name}
     if not sa or not sb:

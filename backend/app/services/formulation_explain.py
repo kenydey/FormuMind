@@ -146,16 +146,18 @@ def _objectives_hit_miss(
                 ok = False
                 detail += f" 低于目标 {t:g}"
         (hits if ok else misses).append(detail)
-    # Metric hits from KG measured edges count as soft objective support
+    # P1-11: KG 实测命中不再包装成"目标达成" —— "该材料有实测数据" ≠ "本配方达标"。
+    # 移出 objectives_hit，由调用方单列"KG 实测支撑" section。
+    kg_support: list[str] = []
     kc = form.kg_compat or {}
     for h in kc.get("measured_metric_hits") or []:
         if not isinstance(h, dict):
             continue
         if h.get("quality") == "good":
-            label = f"KG实测 {h.get('material')}→{h.get('metric')}"
-            if label not in hits:
-                hits.append(label)
-    return hits, misses
+            label = f"KG实测 {h.get('material')}→{h.get('metric')}（该材料实测数据，非本配方实测）"
+            if label not in kg_support:
+                kg_support.append(label)
+    return hits, misses, kg_support
 
 
 def build_formulation_explain(
@@ -169,11 +171,16 @@ def build_formulation_explain(
     if objs is None and requirement is not None:
         objs = list(getattr(requirement, "objectives", None) or [])
 
-    hits, misses = _objectives_hit_miss(form, objs)
+    hits, misses, kg_support = _objectives_hit_miss(form, objs)
     bias = list(getattr(form, "bias_corrected_metrics", None) or [])
     notes: list[str] = []
     if form.rationale:
-        notes.append(form.rationale[:240])
+        # P1-12: LLM 事后解释明确标注为 AI 生成
+        notes.append("🤖 AI 生成说明（未经验证）：" + form.rationale[:240])
+    # P1-11: KG 实测支撑单列，不混入 objectives_hit
+    for _kg in kg_support:
+        if _kg not in notes:
+            notes.append(_kg)
     for w in (form.warnings or [])[:6]:
         if w not in notes:
             notes.append(w)

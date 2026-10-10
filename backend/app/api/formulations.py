@@ -260,11 +260,20 @@ def recommend_formulations(body: RecommendFormulationsRequest) -> RecommendFormu
         scenario_kinds=body.scenario_kinds or None,
         prefer_materials_catalog=bool(body.prefer_materials_catalog),
         synth_override=rec_resp,
+        # P1-1: llm_only 模式无证据，strict grounding 会误删所有成分
+        strict_grounding=(mode != "llm_only"),
         settings=settings,
     )
     aligned, scored, tradeoff = bundle.aligned_formulas, bundle.scored, bundle.tradeoff
     diversity_applied = bundle.diversity_applied
     rec_resp.warnings = bundle.warnings
+
+    # P1-2: 编排后空结果契约 —— 全灭时 503 带因，不返回 200 空列表
+    if not aligned:
+        raise HTTPException(
+            status_code=503,
+            detail="推荐编排后无可用候选: " + "; ".join(bundle.warnings[:3] or ["未知原因"]),
+        )
 
     if retrieve_ok:
         rec_resp.warnings.append(
@@ -404,14 +413,22 @@ def _relation_insights(formulas: list, settings) -> list[dict]:
 
     只对候选成分解析出的实体做关系查询，不做全库关系提取 —— token 开销
     与候选成分数成正比，而不是与库大小成正比。
+
+    P1-5: 加总量上限（最多 20 个成分）与总超时（60s），防无界串行查询。
     """
+    import time
+
     from ..services.kg.entity_resolver import resolve_query
     from ..services.kg.graph_query import discover_substitutes, get_entity_relations
 
     insights: list[dict] = []
     seen: set[str] = set()
+    _deadline = time.monotonic() + 60
+    _max_components = 20
     for f in formulas:
         for comp in (f.components or []):
+            if len(seen) >= _max_components or time.monotonic() > _deadline:
+                return insights
             key = (comp.cas_no or comp.name or "").strip()
             if not key or key in seen:
                 continue

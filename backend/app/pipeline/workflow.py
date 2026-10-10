@@ -129,6 +129,11 @@ def _score_and_validate(
         from ..services import chemtools
 
         form.warnings.extend(chemtools.screen_formulation(form))
+        # P1-13: 危险物质降权 —— 爆炸性/管制警告触发时降分（不删除，人工确认）
+        if any("爆炸性" in w or "管制" in w for w in form.warnings):
+            if getattr(form, "score", None) is not None:
+                form.score = round(form.score * 0.5, 4)
+                form.warnings.append("安全降权：含爆炸性/管制物质嫌疑，评分已降权 50%")
     if chem_screen_local:
         # P3: 零网络本地化学预筛（RDKit 价键 + molbloom patent）——
         # 优化循环安全版，每代数百次调用不触网。

@@ -323,6 +323,22 @@ def predict_full(
     req=None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Return (predicted, predicted_std) dicts including cost/VOC metrics."""
+    # P1-6: grounding 剔除成分后权重和 <100% —— 预测前临时归一化到 100%
+    #（不改存储值，展示层保持诚实），避免 cost/VOC 系统性偏低。
+    try:
+        _total_w = sum(float(getattr(i, "weight_pct", 0) or 0) for i in (form.ingredients or []))
+        if 0 < _total_w < 99.5:
+            import copy
+
+            _form = copy.copy(form)
+            _form.ingredients = [
+                copy.copy(i) for i in (form.ingredients or [])
+            ]
+            for _i in _form.ingredients:
+                _i.weight_pct = round(float(_i.weight_pct or 0) * 100.0 / _total_w, 4)
+            form = _form
+    except Exception:
+        pass
     if req is not None:
         from .property.registry import predict_all
 

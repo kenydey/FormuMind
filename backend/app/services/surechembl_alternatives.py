@@ -196,7 +196,7 @@ def fetch_surechembl_alternatives(
     lim = max(1, min(25, int(limit)))
     try:
         result = client.structure_search(
-            smi, search_type="similarity", threshold=threshold, limit=max(lim * 2, lim)
+            smi, search_type="similarity", threshold=threshold, limit=lim * 2  # 多取一倍供噪声过滤
         )
     except Exception as exc:
         logger.debug("surechembl structure search failed ({})", exc)
@@ -236,6 +236,24 @@ def fetch_surechembl_alternatives(
 
     rows.sort(key=lambda r: (-r["similarity"], r.get("_noise", 0.0), -(r.get("global_frequency") or 0)))
     rows = rows[:lim]
+    # P1-7: 官能团保留检查 —— 结构相似 ≠ 功能等价，缺失关键官能团时标注
+    try:
+        from .chemtools import func_groups as _fg
+
+        _query_fgs = set(_fg(smi) or [])
+        if _query_fgs:
+            for r in rows:
+                _alt_fgs = set(_fg(r.get("smiles") or "") or [])
+                _missing = _query_fgs - _alt_fgs
+                if _missing:
+                    r["func_group_warning"] = (
+                        "官能团差异：缺失 %s，功能等价性未经验证，请实验确认"
+                        % "、".join(sorted(_missing)[:3])
+                    )
+                # P2-4: 注释意图
+                # (limit 取 lim*2 是为噪声过滤后仍有足够候选)
+    except Exception:
+        pass
     for r in rows:
         r.pop("_noise", None)
 

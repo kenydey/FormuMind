@@ -23,7 +23,12 @@ export function formulaToCsv(form: Formulation): string {
   lines.push("Ingredient,Role,Formula,Weight %");
   for (const ing of form.ingredients) {
     const cells = [ing.name, ing.role, ing.formula ?? "", String(ing.weight_pct)];
-    lines.push(cells.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(","));
+    // P1-14: CSV 公式注入防护 —— =+-@ 开头加单引号前缀
+    lines.push(cells.map((c) => {
+      let s = /[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c;
+      if (/^[=+\-@]/.test(s)) s = `'${s}`;
+      return s;
+    }).join(","));
   }
   lines.push("");
   lines.push("Predicted property,Value,Std");

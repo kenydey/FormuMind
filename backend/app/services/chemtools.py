@@ -695,6 +695,16 @@ def screen_formulation_local(form: Any) -> list[str]:
                     )
             except Exception:
                 pass
+        # P1-13: 爆炸性筛查（GHS 2.1，PubChem 缓存；无 CAS/无网络时静默跳过）
+        try:
+            cas = getattr(ing, "cas_no", None) or getattr(ing, "cas", None)
+            if cas and explosive_check(cas) is True:
+                warnings.append(
+                    f"⚠️ 安全警告：{name}（CAS {cas}）被 GHS 归类为爆炸性物质，"
+                    f"建议人工确认合规性后再采用"
+                )
+        except Exception:
+            pass
     return warnings
 
 
