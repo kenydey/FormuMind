@@ -53,9 +53,11 @@ def test_adversarial_pairs_have_decidable_expectations():
         has_abstain = bool(p.get("expect_abstain"))
         has_value = isinstance(p.get("expected_value"), dict)
         has_contra = bool(p.get("expect_contradiction_flag"))
-        assert has_abstain or has_value or has_contra, (
+        # PageIndex 借鉴 A4: 页码编造 trap（expect_page_dishonest）
+        has_page_trap = bool(p.get("expect_page_dishonest"))
+        assert has_abstain or has_value or has_contra or has_page_trap, (
             f"{tag} 必须声明 expect_abstain / expected_value / "
-            "expect_contradiction_flag 之一"
+            "expect_contradiction_flag / expect_page_dishonest 之一"
         )
         if has_value:
             ev = p["expected_value"]

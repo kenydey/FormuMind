@@ -539,6 +539,7 @@ def prepare_chunk_rows(
                     "text": c.text,
                     "heading_path": c.heading_path,
                     "page_no": c.page_no,
+                    "page_end": c.page_end,  # PageIndex 借鉴 A5: 跨页末页
                     "paragraph_idx": c.paragraph_idx,
                     "offset_start": c.offset_start,
                     "offset_end": c.offset_end,
@@ -965,6 +966,8 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
     if getattr(chunk, "page_no", None):
         title = f"{title} · P{chunk.page_no}"
     page = getattr(chunk, "page_no", None)
+    # PageIndex 借鉴 A5: 跨页末页透传
+    page_end = getattr(chunk, "page_end", None)
     paragraph = getattr(chunk, "paragraph_idx", None)
     return Evidence(
         source=meta.get("source_kind") or "kb",
@@ -974,6 +977,8 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
         # P2-1: 去掉 relevance 下限钳制（0.05 遗留自 RRF 时代，weighted 下抹平尾部区分度）
         relevance=max(0.0, min(1.0, round(score, 4))),
         page=int(page) if page is not None else None,
+        # PageIndex 借鉴 A5: 跨页末页（None = 单页）
+        page_end=int(page_end) if page_end is not None else None,
         paragraph=int(paragraph) if paragraph is not None else None,
     )
 

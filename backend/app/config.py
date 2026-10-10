@@ -932,12 +932,22 @@ class Settings(BaseSettings):
     # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做加性，
     # 再进融合。默认关，A/B 验证后再决定。
     kb_hybrid_entity_boost: bool = False
+    # PageIndex 借鉴 A1: 本地 tier 编号标题规则扩展（Roman/CJK/字母/Chapter）。
+    # 纯文本规则，零 LLM，默认开；关则退回原有三组正则。
+    pdf_heading_rules_extended: bool = True
+    # PageIndex 借鉴 A3: heading 粗召回 bonus（hybrid 融合前加性）。
+    # 默认关，golden A/B 验证后再决定。
+    kb_heading_boost: bool = False
+    kb_heading_boost_weight: float = 0.15
     # 推荐/研究 KB 融合走 hybrid_search_scored（探针同栈）；关则退回 search_chunks。
     kb_recommend_use_hybrid: bool = True
     # 有 project_id 时是否并入全局资料（对齐探针 project_global）。
     kb_recommend_include_global: bool = True
     # 仅推荐/研究融合路径的可选 LLM 精排（默认关；不改动 search_rerank_enabled）。
     kb_recommend_rerank_enabled: bool = False
+    # PageIndex 借鉴 A2: PDF 内嵌书签 → heading_path 补充源。默认关；
+    # 开启后 parse 成功时读一次书签，chunking 给空 heading_path 的 chunk 按页补充。
+    pdf_bookmark_headings_enabled: bool = False
 
     # 化学/产品实体抽取（KB stream P2）：入库切块时识别 CAS/分子式/SMILES/反应式
     # 与商业牌号（规则层离线；LLM 层搭 source_guide 便车），写入 chunk 元数据与

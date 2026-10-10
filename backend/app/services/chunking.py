@@ -80,6 +80,8 @@ class Chunk:
     text: str
     heading_path: str = ""
     page_no: int | None = None
+    # PageIndex 借鉴 A5: 跨页 chunk 的末页（None = 单页，与 page_no 相同）。
+    page_end: int | None = None
     paragraph_idx: int | None = None
     offset_start: int | None = None
     offset_end: int | None = None
@@ -443,12 +445,30 @@ def _split_pages(md: str) -> list[tuple[int | None, str]]:
 
 
 def chunk_markdown(
-    md: str, *, max_chars: int = 1600, overlap: int = 200
+    md: str, *, max_chars: int = 1600, overlap: int = 200,
+    bookmarks: list[tuple[str, int, int]] | None = None,
 ) -> list[Chunk]:
-    """Structure-aware chunking; degrades to the plain splitter for non-Markdown."""
+    """Structure-aware chunking; degrades to the plain splitter for non-Markdown.
+
+    PageIndex 借鉴 A2: ``bookmarks`` 为 [(title, level, page_1based)] 时，
+    page-wise 分支中 heading_path 为空的 chunk 按页查表补充。
+    """
     md = (md or "").strip()
     if not md:
         return []
+
+    # PageIndex 借鉴 A2: 书签按页区间展开（只需算一次）
+    _bm_map: dict[int, str] = {}
+    if bookmarks:
+        try:
+            from .parsing import _bookmarks_to_page_map
+
+            _pages = [p for _, _, p in bookmarks]
+            _bm_map = _bookmarks_to_page_map(
+                bookmarks, max(_pages) if _pages else 0
+            )
+        except Exception:
+            _bm_map = {}
 
     sections = _split_sections(md)
     has_structure = (
@@ -472,8 +492,10 @@ def chunk_markdown(
                 for c, off in chunk_plain_text_with_offsets(
                     seg, max_chars=max_chars, overlap=overlap
                 ):
+                    # PageIndex 借鉴 A2: 空 heading_path 按书签页映射补充
+                    _hp = _bm_map.get(page_no, "") if page_no else ""
                     chunks.append(Chunk(
-                        c, "", page_no,
+                        c, _hp[:_MAX_HEADING_PATH], page_no,
                         paragraph_idx=para_idx,
                         offset_start=seg_base + off,
                         offset_end=seg_base + off + len(c),
@@ -516,16 +538,17 @@ def chunk_markdown(
     def _emit_verbatim_or_split(
         t: str, os_: int, blocks: list[str], body_start: int,
         seg_base: int, md: str, body: str, path: str, page_no,
-        para_idx: int, blk_type: str,
+        para_idx: int, blk_type: str, page_end: int | None = None,
     ) -> list["Chunk"]:
         """v14-5: 优先整体发射（verbatim）；md[os:oe]!=t 时退化逐 block 发射。
 
         单个 strip block 经 body.find 必命中，verbatim 天然成立。
+        PageIndex 借鉴 A5: page_end 为跨页 chunk 的末页（None = 单页）。
         """
         oe_ = os_ + len(t)
         if md[os_:oe_] == t:
             return [Chunk(
-                t, path, page_no, paragraph_idx=para_idx,
+                t, path, page_no, page_end=page_end, paragraph_idx=para_idx,
                 offset_start=os_, offset_end=oe_, block_type=blk_type,
             )]
         # 降级：逐 block 发射
@@ -540,7 +563,8 @@ def chunk_markdown(
                 continue
             bos_ = seg_base + bpos
             out.append(Chunk(
-                blk, path, page_no, paragraph_idx=para_idx + _bi,
+                blk, path, page_no, page_end=page_end,
+                paragraph_idx=para_idx + _bi,
                 offset_start=bos_, offset_end=bos_ + len(blk),
                 block_type=blk_type or _classify_block_type(blk),
             ))
@@ -558,6 +582,8 @@ def chunk_markdown(
         # v14-5: 保留块边界，用于 verbatim 降级（逐 block 发射）
         current_blocks: list[str] = []
         current_page = page
+        # PageIndex 借鉴 A5: 跨页跟踪 —— current 累积期间遇到的最末页码
+        current_page_end = page
         current_para = para_counter
         for block in _split_blocks(body):
             # 推进 body_cursor（markers 也占原文位置）
@@ -567,6 +593,10 @@ def chunk_markdown(
                 page = int(m.group(1))
                 if not current.strip():
                     current_page = page
+                    current_page_end = page
+                else:
+                    # PageIndex 借鉴 A5: 累积中遇到新页 marker，记录末页
+                    current_page_end = page
                 continue
             bm = BLOCK_MARKER_RE.match(block)
             if bm:
@@ -592,14 +622,18 @@ def chunk_markdown(
                     # block 已 strip 故无前导空白）
                     # v14-5: verbatim 不成立时退化逐 block 发射
                     os_ = seg_base + current_start_body
+                    # PageIndex 借鉴 A5: 跨页 chunk 记录末页
+                    _pe = current_page_end if current_page_end != current_page else None
                     chunks.extend(_emit_verbatim_or_split(
                         t, os_, current_blocks, current_start_body,
                         seg_base, md, body, path, current_page,
                         current_para, pending_block or "text",
+                        page_end=_pe,
                     ))
                     current = ""
                     current_blocks = []
                     pending_block = None
+                    current_page_end = current_page
                 atom = f"{caption}\n\n{block}" if caption else block
                 # v13-4: atom 定位——优先找完整 atom，否则用 caption 位置，
                 # 再否则用 block 位置（bpos）
@@ -669,14 +703,17 @@ def chunk_markdown(
                 t = current.strip()
                 os_ = seg_base + current_start_body
                 # v14-5: verbatim 不成立时退化逐 block 发射
+                _pe = current_page_end if current_page_end != current_page else None
                 chunks.extend(_emit_verbatim_or_split(
                     t, os_, current_blocks, current_start_body,
                     seg_base, md, body, path, current_page,
                     current_para, pending_block or "text",
+                    page_end=_pe,
                 ))
                 current = ""
                 current_blocks = []
                 pending_block = None
+                current_page_end = current_page
             current_page = page
             current_para = para_counter
             if len(block) > max_chars:
@@ -701,6 +738,7 @@ def chunk_markdown(
                 # v13-4: block 太长放不下、current 已刷出，block 独立成段
                 current_start_body = bpos if bpos != -1 else body_cursor
                 current = block
+                current_page_end = page
                 # v14-5: 同步块边界
                 current_blocks = [block]
             para_counter += 1
@@ -708,10 +746,12 @@ def chunk_markdown(
             t = current.strip()
             os_ = seg_base + current_start_body
             # v14-5: verbatim 不成立时退化逐 block 发射
+            _pe = current_page_end if current_page_end != current_page else None
             chunks.extend(_emit_verbatim_or_split(
                 t, os_, current_blocks, current_start_body,
                 seg_base, md, body, path, current_page,
                 current_para, pending_block or "text",
+                page_end=_pe,
             ))
             pending_block = None
     return chunks

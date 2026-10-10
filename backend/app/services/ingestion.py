@@ -49,12 +49,21 @@ def _chunk_text(
     return chunk_plain_text(text, max_chars=max_chars, overlap=overlap, max_depth=max_depth)
 
 
-def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evidence]:
+def _to_evidence(
+    text: str,
+    filename: str,
+    *,
+    source: str = "local",
+    bookmarks: list[tuple[str, int, int]] | None = None,
+) -> list[Evidence]:
     """Split text into chunk-level Evidence objects (structure-aware).
 
     Markdown heading paths are appended to chunk titles (``report (p.3) ·
     实施例 > 实施例 2``) so TF-IDF / ColBERT retrieval and citations see the
     document location; tables stay atomic.
+
+    PageIndex 借鉴 A2: ``bookmarks`` 为 PDF 内嵌书签时，空 heading_path 的
+    chunk 按页补充。
     """
     from .chunking import chunk_markdown
 
@@ -64,6 +73,7 @@ def _to_evidence(text: str, filename: str, *, source: str = "local") -> list[Evi
         text,
         max_chars=settings.ingest_chunk_max_chars,
         overlap=settings.ingest_chunk_overlap,
+        bookmarks=bookmarks,
     )
     chunks = [c for c in chunks if len(c.text.strip()) > 30]
     if not chunks and text.strip():
@@ -104,6 +114,7 @@ def _ingest_parsed_text(
     persist: bool = True,
     origin_url: str | None = None,
     parser: str | None = None,  # P3-5: ParseResult.parser provenance
+    bookmarks: list[tuple[str, int, int]] | None = None,  # PageIndex 借鉴 A2
 ) -> IngestOutcome:
     settings = get_settings()
     guide: SourceGuideSchema | None = None
@@ -126,7 +137,7 @@ def _ingest_parsed_text(
         # conflating the two silently drops real documents from the index.
         status = "no_guide"
 
-    evidence = _to_evidence(text, filename, source=source_kind)
+    evidence = _to_evidence(text, filename, source=source_kind, bookmarks=bookmarks)
 
     source_id: str | None = None
     warnings: list[str] = []
@@ -342,6 +353,7 @@ def ingest_file(
         persist=persist,
         origin_url=origin_url,
         parser=getattr(parsed, "parser", None),
+        bookmarks=getattr(parsed, "bookmarks", None),  # PageIndex 借鉴 A2
     )
     # Phase 1: MinerU structured products → extraction_tables/formulas.
     # Fail-open: a structured-persist failure must never break the ingest

@@ -23,9 +23,12 @@ evidence 的 text 中找到（直接出现或经明确单位换算）。
 from __future__ import annotations
 
 # 数据集版本（单调递增；变更必须同步更新 CHANGELOG 并经 review）。
-DATASET_VERSION = 3
+DATASET_VERSION = 4
 
 # CHANGELOG:
+#   v4 (2026-10-11, PageIndex 借鉴 A4): 48 → 51 组。新增 1 组页码诚实正例 +
+#      2 组页码编造对抗用例（expect_page_dishonest），由 page_citation_honesty
+#      指标检出（rigor_gate adversarial 章节新增该指标）。
 #   v3 (2026-09-28, Wave 3 round3): 32 → 44 组。新增 12 组对抗用例
 #      （"adversarial": True），answer 为 trap 答案（模拟 naive 系统输出），
 #       每组带可判定的小期望：expect_abstain（4 组：证据不足应拒答）、
@@ -1333,6 +1336,71 @@ golden_rigor_pairs: list[dict] = [
         "key_claims": [
             {"text": "固体分 26%", "keywords": ["固体分", "26%"]},
         ],
+    },
+    # PageIndex 借鉴 A4: 页码诚实性用例（v4 新增）
+    {
+        "question": "环氧底漆的表干时间是多少？",
+        "answer": (
+            "环氧底漆表干时间为 2 小时[^1] (p.3)，实干 24 小时[^2] (p.5)。"
+        ),
+        "evidence": [
+            {
+                "identifier": "tds-epoxy-dry",
+                "title": "环氧底漆技术数据表",
+                "doi": "",
+                "text": "表干时间 2 小时（25°C），实干 24 小时。",
+                "page": 3,
+            },
+            {
+                "identifier": "tds-epoxy-dry-2",
+                "title": "环氧底漆施工指南",
+                "doi": "",
+                "text": "实干 24 小时后可涂装面漆。",
+                "page": 5,
+            },
+        ],
+        "key_claims": [
+            {"text": "表干 2 小时", "keywords": ["表干", "2小时"]},
+        ],
+    },
+    {
+        "question": "该体系的耐盐雾性能？（页码编造负例）",
+        "answer": (
+            "该体系通过 1000 小时盐雾测试[^1] (p.9)。"
+        ),
+        "evidence": [
+            {
+                "identifier": "test-report-fake-page",
+                "title": "盐雾测试报告",
+                "doi": "",
+                "text": "1000 小时盐雾后无锈蚀。",
+                "page": 2,
+            },
+        ],
+        "key_claims": [
+            {"text": "1000 小时盐雾无锈蚀", "keywords": ["1000小时", "盐雾"]},
+        ],
+        "adversarial": True,  # 答案页码 (p.9) 与证据 (p.2) 不符 → page_citation_honesty 应 fail
+        "expect_page_dishonest": True,
+    },
+    {
+        "question": "文献中的缓蚀剂浓度？（无页码证据编造负例）",
+        "answer": (
+            "钼酸钠缓蚀剂推荐浓度为 0.5%[^1] (p.4)。"
+        ),
+        "evidence": [
+            {
+                "identifier": "lit-molybdate",
+                "title": "钼酸盐缓蚀剂研究",
+                "doi": "10.0000/fake",
+                "text": "钼酸钠在 0.5% 浓度下缓蚀效率最高。",
+            },
+        ],
+        "key_claims": [
+            {"text": "钼酸钠 0.5%", "keywords": ["钼酸钠", "0.5%"]},
+        ],
+        "adversarial": True,  # 证据无 page，答案写 (p.4) → 编造，应 fail
+        "expect_page_dishonest": True,
     },
 ]
 

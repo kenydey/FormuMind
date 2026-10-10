@@ -227,6 +227,8 @@ export interface Evidence {
   taxonomy_source?: string | null;
   /** Page / paragraph locators (Wave D locator honesty). */
   page?: number | null;
+  /** PageIndex 借鉴 A5: 跨页末页（null = 单页）。 */
+  page_end?: number | null;
   paragraph?: number | null;
 }
 

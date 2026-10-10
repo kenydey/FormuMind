@@ -130,6 +130,8 @@ class ChunkStore:
                     text=text,
                     heading_path=(chunk.get("heading_path") or "")[:120],
                     page_no=chunk.get("page_no"),
+                    # PageIndex 借鉴 A5: 跨页末页
+                    page_end=chunk.get("page_end"),
                     # P2 (0042): L1 去重索引键 —— 写入时计算，_l1_exact 走索引查。
                     # v7 KB-7: heading_path 统一 [:120] 截断，与迁移回填算法一致。
                     dedup_key=_chunk_dedup_key(

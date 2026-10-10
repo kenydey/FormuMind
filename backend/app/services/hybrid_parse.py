@@ -83,11 +83,20 @@ def _needs_escalation(page: pdf_local.LocalPage) -> bool:
     return False
 
 
-# "1.1.2 X" / "1.1 X": 编号自带点, 后接空白即可;  "1. X": 半角点后必须空白
-# ("0.5% 硅烷" 的 0.5 不得命中);  "1、引言"/"1。引言": 中文分隔符后空白可省
+# PageIndex 借鉴 A1 (Route 2): 扩展编号规则 —— Roman / CJK 汉字数字 / 字母 / Chapter。
+# 均为纯文本 token 规则（仿 pageindex/flash/heading_detection/detectors.py），
+# 防误伤约束：编号后必须跟分隔符+非空文本；"2026 年"这类无分隔符数字开头不命中。
+# 原有三组正则（数字编号）保留：
 _HEADING_MULTI_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){1,2})[\s\u3000]+(\S)")
 _HEADING_DOT_RE = re.compile(r"^(\d{1,2})\.[ \u3000]+(\S)")
 _HEADING_CN_RE = re.compile(r"^(\d{1,2})[、\u3000][ \u3000]*(\S)")
+_HEADING_ROMAN_RE = re.compile(r"^([IVXLCDM]{1,6})\.[ \u3000]+(\S)")
+_HEADING_CJK_NUM_RE = re.compile(r"^([一二三四五六七八九十百千两]{1,6})[、.\u3000][ \u3000]*(\S)")
+_HEADING_LETTER_RE = re.compile(r"^([A-Ha-h])\.[ \u3000]+(\S)")
+_HEADING_CHAPTER_RE = re.compile(
+    r"^((?:Chapter|CHAPTER|Appendix|APPENDIX|第[一二三四五六七八九十百千\d]+[章节篇]|附录)\b[ \u3000]*\d*[ \u3000]+)(\S)",
+    re.IGNORECASE,
+)
 
 
 def _heading_markdown(text: str, api_level: int) -> tuple[str, int] | None:
@@ -111,6 +120,26 @@ def _heading_markdown(text: str, api_level: int) -> tuple[str, int] | None:
     m = _HEADING_CN_RE.match(stripped)
     if m:
         return stripped, 1
+    # PageIndex 借鉴 A1 (Route 2): 扩展编号规则，开关 pdf_heading_rules_extended。
+    try:
+        from ..config import get_settings
+
+        _extended = bool(get_settings().pdf_heading_rules_extended)
+    except Exception:
+        _extended = True
+    if _extended:
+        m = _HEADING_ROMAN_RE.match(stripped)
+        if m:
+            return stripped, 1
+        m = _HEADING_CJK_NUM_RE.match(stripped)
+        if m:
+            return stripped, 1
+        m = _HEADING_LETTER_RE.match(stripped)
+        if m:
+            return stripped, 1
+        m = _HEADING_CHAPTER_RE.match(stripped)
+        if m:
+            return stripped, 1
     if api_level:
         return stripped, min(max(int(api_level), 1), 6)
     return None
@@ -492,6 +521,38 @@ def _scanned_without_cloud(content: bytes) -> str | None:
     return text
 
 
+def _apply_heading_rules_local(markdown: str) -> str:
+    """PageIndex 借鉴 A1: 本地 tier 编号标题规则。
+
+    pymupdf4llm 的黑盒 `#` 发射会漏掉纯编号标题（如 "IV. 结果"、"附录 A"）。
+    对非标题行跑 `_heading_markdown`，命中则补 `#` 前缀。保守约束：
+    只处理 ≤80 字符的行（标题通常短，正文编号列表项通常长），防误伤。
+    Fail-open：异常时原文返回。
+    """
+    try:
+        from ..config import get_settings
+
+        if not get_settings().pdf_heading_rules_extended:
+            return markdown
+    except Exception:
+        pass
+    try:
+        out: list[str] = []
+        for line in markdown.splitlines():
+            s = line.strip()
+            if s and not s.startswith("#") and len(s) <= 80:
+                hit = _heading_markdown(s, 0)
+                if hit:
+                    _, level = hit
+                    # _heading_markdown 返回 (stripped, level)；stripped == s
+                    out.append(f"{'#' * level} {s}")
+                    continue
+            out.append(line)
+        return "\n".join(out)
+    except Exception:
+        return markdown
+
+
 def parse(content: bytes) -> str | None:
     """Parse *content*, escalating only the pages that need it.
 
@@ -506,6 +567,8 @@ def parse(content: bytes) -> str | None:
         return None
 
     local_only = pdf_local.assemble([(p.page_no, p.markdown) for p in pages])
+    # PageIndex 借鉴 A1: 本地 tier 补编号标题规则（pymupdf4llm 黑盒漏掉的纯编号标题）。
+    local_only = _apply_heading_rules_local(local_only)
     scanned = pdf_local.looks_scanned(pages)
 
     available, hint = mineru_cloud.mineru_available()

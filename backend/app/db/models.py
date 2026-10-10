@@ -279,6 +279,8 @@ class DocumentChunk(Base):
     # Source-page provenance (from <!-- page:N --> parser markers); citations
     # can point at the exact page of the original PDF.
     page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # PageIndex 借鉴 A5: 跨页 chunk 的末页（NULL = 单页，与 page_no 相同）。
+    page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Layout provenance (Phase 0, ragflow/kotaemon eval): normalized bounding
     # box [xmin, ymin, xmax, ymax] as page width/height fractions (0-1 floats),
     # so frontend rendering is DPI/zoom independent. NULL until a layout-aware

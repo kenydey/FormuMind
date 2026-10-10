@@ -393,6 +393,8 @@ class Evidence(BaseModel):
     taxonomy_source: Literal["arxiv", "openalex", "chemrxiv", "cpc", "lexical", "none"] | None = None
     # P1 #16: page/paragraph anchors for citation lines (align CitationAnchor).
     page: int | None = None
+    # PageIndex 借鉴 A5: 跨页末页（None = 单页，与 page 相同）。
+    page_end: int | None = None
     paragraph: int | None = None
     # W2-2 (P1-7): two-stage search→read — whether the full text is already
     # persisted locally (read stage can skip the download). None = unknown.

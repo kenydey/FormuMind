@@ -66,6 +66,9 @@ class ParseResult:
     # v29 Phase3 D-1: 表格抽取可观测性 —— table_stats 记录抽取数/成功数/警告数，
     # 便于发现静默丢表问题（如 H-6 类）。
     table_stats: dict = field(default_factory=dict)
+    # PageIndex 借鉴 A2: PDF 内嵌书签 [(title, level, page_1based)]，供
+    # chunking 按页补充 heading_path。空 = 无书签或书签不可信（逐字节一致）。
+    bookmarks: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -918,6 +921,79 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 # PageIndex 借鉴 P1: 不发射 <!-- page:N --> 的 tier —— 获胜后需补近似页码。
 _PAGELESS_TIERS = frozenset({"marker", "markitdown"})
 
+# PageIndex 借鉴 A2: PDF 书签 → heading_path 补充源。
+# 只做"书签按页区间展开为 page → heading_path 映射"，不做章节树融合。
+_BOOKMARK_GENERIC_RE = re.compile(r"^(page|slide|folie|document page)?\d+$", re.IGNORECASE)
+
+
+def _read_pdf_bookmarks(content: bytes) -> list[tuple[str, int, int]]:
+    """读取 PDF 内嵌书签，返回 [(title, level, page_1based)]。
+
+    PageIndex 式判定（embedded_toc.py 思想的最小版）：页码单调性校验 +
+    通用标题过滤 + 条目过少忽略。任何异常 → []（fail-open）。
+    """
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        reader = PdfReader(io.BytesIO(content))
+        outline = reader.outline
+        if not outline:
+            return []
+        items: list[tuple[str, int, int]] = []
+
+        def _walk(nodes, level: int) -> None:
+            for node in nodes:
+                if isinstance(node, list):
+                    _walk(node, level + 1)
+                    continue
+                try:
+                    title = str(node.title or "").strip()
+                    page = reader.get_destination_page_number(node)
+                    if title:
+                        items.append((title, level, int(page) + 1))
+                except Exception:
+                    continue
+
+        _walk(outline, 0)
+        if len(items) < 3:
+            return []
+        # 页码单调性：非单调的书签不可信
+        pages = [p for _, _, p in items]
+        if any(b < a for a, b in zip(pages, pages[1:])):
+            return []
+        # 通用标题过滤：≥50% 是 "Page 1" 之类的无意义标题则忽略
+        generic = sum(1 for t, _, _ in items if _BOOKMARK_GENERIC_RE.match(t))
+        if generic * 2 >= len(items):
+            return []
+        return items
+    except Exception:
+        return []
+
+
+def _bookmarks_to_page_map(
+    bookmarks: list[tuple[str, int, int]], n_pages: int
+) -> dict[int, str]:
+    """书签按页区间展开为 {page_no: heading_path}。"""
+    page_map: dict[int, str] = {}
+    # 按 level 建路径栈
+    sorted_bm = sorted(bookmarks, key=lambda x: (x[2], x[1]))
+    stack: list[tuple[int, str]] = []
+    # 每个书签覆盖 [page, 下一个同级/上级书签页) 区间
+    for i, (title, level, page) in enumerate(sorted_bm):
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, title))
+        path = " > ".join(t for _, t in stack)
+        end = n_pages + 1
+        for _, lv2, pg2 in sorted_bm[i + 1 :]:
+            if lv2 <= level:
+                end = pg2
+                break
+        for p in range(page, min(end, n_pages + 1)):
+            # 深层级后写入覆盖浅层级（同页取最具体的路径）
+            page_map[p] = path
+    return page_map
+
 
 def _inject_approximate_page_markers(content: bytes, text: str) -> str:
     """PageIndex 借鉴 P1: 对无页码 tier 的输出按字符均分插入页码 marker。
@@ -1101,6 +1177,16 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                                 name,
                             )
                     final = result if result is not None else ParseResult(text, name)
+                    # PageIndex 借鉴 A2: PDF 书签 → heading_path 补充源。
+                    # 开关默认关；只读一次，异常即 []（fail-open）。
+                    try:
+                        from ..config import get_settings as _gs
+
+                        _bm_on = bool(_gs().pdf_bookmark_headings_enabled)
+                    except Exception:
+                        _bm_on = False
+                    if _bm_on and not final.bookmarks:
+                        final.bookmarks = _read_pdf_bookmarks(content)
                     return _maybe_extract_tables(final, content)
             timing.note(parser="none")
             return ParseResult("", "none")

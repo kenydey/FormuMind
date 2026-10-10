@@ -109,7 +109,9 @@ def main() -> int:
 
     metric_names = ("citation_veracity", "coverage", "numeric_consistency")
     # 对抗集单独计分：不参与 32 组通过线判定，只报告 trap 检出情况。
-    adv_metric_names = ("abstention_correctness", "contradiction_flagged", "value_correctness")
+    adv_metric_names = ("abstention_correctness", "contradiction_flagged", "value_correctness",
+                        # PageIndex 借鉴 A4: 页码编造 trap 由 page_citation_honesty 检出
+                        "page_citation_honesty")
     standard_pairs = [p for p in golden_rigor_pairs if not p.get("adversarial")]
     adversarial_pairs = [p for p in golden_rigor_pairs if p.get("adversarial")]
     sums = {m: 0.0 for m in metric_names}

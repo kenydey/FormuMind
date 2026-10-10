@@ -7,6 +7,7 @@ import Modal from "./Modal";
 import TableBadges from "./TableBadges";
 import ExtractionTablesPanel from "./ExtractionTablesPanel";
 import "./CitationRenderer.css"; // W3-14: 复用 citation-flash 高亮动画
+import DocOutline from "./DocOutline"; // PageIndex 借鉴 B2: 文档大纲侧边栏
 import { api, type KbChunk } from "../api";
 
 export default function SourceDetailModal({
@@ -95,8 +96,27 @@ export default function SourceDetailModal({
     return () => window.clearTimeout(t);
   }, [busy, chunks, focusPage]);
 
-  async function linkToKg() {
-    setLinking(true);
+  // PageIndex 借鉴 B2: 大纲节点点击 → 跳到该页首个 chunk（复用 focusPage 滚动机制）。
+  const jumpToOutlinePage = useCallback(
+    (targetPage: number | null) => {
+      if (!chunks || targetPage == null) return;
+      const idx = chunks.findIndex((c) => c.page === targetPage);
+      if (idx < 0) return;
+      setFlashIdx(idx);
+      setPage(Math.floor(idx / CHUNK_PAGE_SIZE));
+      window.setTimeout(() => {
+        const el = document.getElementById(`source-chunk-${targetPage}-${idx}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("citation-flash");
+          window.setTimeout(() => el.classList.remove("citation-flash"), 2000);
+        }
+      }, 100);
+    },
+    [chunks],
+  );
+
+  async function linkToKg() {    setLinking(true);
     setLinkReport(null);
     setError(null);
     try {
@@ -132,6 +152,10 @@ export default function SourceDetailModal({
           {linkReport && <span className="text-[11px] text-emerald-400">{linkReport}</span>}
         </div>
         {error && <div className="text-xs text-rose-400 bg-rose-500/10 rounded p-2">{error}</div>}
+        {/* PageIndex 借鉴 B2: 文档大纲（纯前端，数据源为已加载 chunks） */}
+        {chunks && chunks.length > 0 && (
+          <DocOutline chunks={chunks} onSelectNode={jumpToOutlinePage} />
+        )}
         {/* W3-7: 表格抽取 badge（kind 标签 + 行列预览） */}
         <TableBadges sourceId={sourceId} />
         {/* Up-5A: 切块 / 结构化表格公式 页签 */}

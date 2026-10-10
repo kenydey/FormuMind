@@ -123,14 +123,19 @@ function DeepResearchStages({
 }
 
 function CitationChip({ ev }: { ev: Evidence }) {
-  const pageLabel =
-    ev.page != null && Number.isFinite(Number(ev.page))
+  const hasPage = ev.page != null && Number.isFinite(Number(ev.page));
+  const hasRange =
+    hasPage &&
+    ev.page_end != null &&
+    Number.isFinite(Number(ev.page_end)) &&
+    Number(ev.page_end) > Number(ev.page);
+  // PageIndex 借鉴 A5: 跨页显示页码范围
+  const pageLabel = hasRange
+    ? `pp. ${ev.page}–${ev.page_end}`
+    : hasPage
       ? `pp. ${ev.page}`
       : "页码未知";
-  const pageTone =
-    ev.page != null && Number.isFinite(Number(ev.page))
-      ? "text-accent/80"
-      : "text-slate-500";
+  const pageTone = hasPage ? "text-accent/80" : "text-slate-500";
   // PageIndex 借鉴 P7/P8: 引用可点击，新页面打开源文件。
   // KB 本地文档 → /api/documents/{source_id}/file#page=N（浏览器原生跳页）；
   // 文献 → oa_pdf_url（无则 landing 页 url）。

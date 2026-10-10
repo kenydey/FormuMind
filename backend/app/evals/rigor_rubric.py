@@ -23,6 +23,10 @@
 6. ``value_correctness`` —— 对抗用例（``pair_meta["expected_value"]={"value","unit"}``）：
    答案中的数值经单位归一化后是否与期望值一致（防"数字在引用中有但张冠李戴"，
    这是 ``numeric_consistency`` 覆盖不到的）。非对抗 pair 记 ``not_applicable``。
+7. ``page_citation_honesty`` —— PageIndex 借鉴 A4：答案中 ``[^n]`` 后的页码标注
+   （``[^1] (p.5)`` / ``[^1] p.5``，P4 约定格式）必须诚实：证据无页码而答案写了
+   页码记 fail（编造）；页码与 ``evidence[n-1].page`` 不符记 fail。答案无页码
+   标注时记 ``not_applicable``（P4 下页码标注可选，不惩罚不写）。
 
 新指标在 ``evaluate_rigor`` 中通过 ``pair_meta`` 传入；``not_applicable`` 的
 指标不参与 ``passed`` 判定。旧三项行为、阈值保持不变。
@@ -69,6 +73,7 @@ __all__ = [
     "metric_contradiction_flagged",
     "metric_coverage",
     "metric_numeric_consistency",
+    "metric_page_citation_honesty",
     "metric_value_correctness",
 ]
 
@@ -264,6 +269,54 @@ def metric_contradiction_flagged(
     return {"score": 1.0 if not failures else 0.0, "failures": failures}
 
 
+# PageIndex 借鉴 A4: 引用页码诚实性 —— 答案中 [^n] 后的页码标注必须与证据一致。
+# P4 约定格式: [^1] (p.5) / [^1] p.5。无标注 → not_applicable（不惩罚不写）。
+_PAGE_CITE_RE = re.compile(r"\[\^(\d+)\]\s*\(?p\.?\s*(\d+)\)?")
+
+
+def metric_page_citation_honesty(
+    answer: str, evidence: list[dict[str, Any]]
+) -> dict[str, Any]:
+    hits = _PAGE_CITE_RE.findall(answer or "")
+    if not hits:
+        return {"score": 1.0, "failures": [], "not_applicable": True}
+    failures: list[dict[str, str]] = []
+    valid = 0
+    for n_s, p_s in hits:
+        n, claimed = int(n_s), int(p_s)
+        if n < 1 or n > len(evidence):
+            failures.append(
+                {"claim": f"[^{n}] (p.{claimed})", "reason": "引用越界，无对应证据"}
+            )
+            continue
+        actual = (evidence[n - 1] or {}).get("page")
+        if actual is None:
+            failures.append(
+                {
+                    "claim": f"[^{n}] (p.{claimed})",
+                    "reason": "证据无页码，答案编造了页码",
+                }
+            )
+            continue
+        try:
+            if int(actual) != claimed:
+                failures.append(
+                    {
+                        "claim": f"[^{n}] (p.{claimed})",
+                        "reason": f"页码与证据不符（证据为 p.{actual}）",
+                    }
+                )
+                continue
+        except (TypeError, ValueError):
+            failures.append(
+                {"claim": f"[^{n}] (p.{claimed})", "reason": "证据页码不可解析"}
+            )
+            continue
+        valid += 1
+    score = valid / len(hits) if hits else 1.0
+    return {"score": round(score, 4), "failures": failures}
+
+
 def metric_value_correctness(
     answer: str, pair_meta: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -335,6 +388,8 @@ def evaluate_rigor(
         ("abstention_correctness", metric_abstention_correctness, (answer, pair_meta)),
         ("contradiction_flagged", metric_contradiction_flagged, (answer, ev, pair_meta)),
         ("value_correctness", metric_value_correctness, (answer, pair_meta)),
+        # PageIndex 借鉴 A4: 页码诚实性（独立指标，不碰现有门禁）
+        ("page_citation_honesty", metric_page_citation_honesty, (answer, ev)),
     ):
         try:
             metrics[name] = fn(*args)

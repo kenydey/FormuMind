@@ -563,6 +563,33 @@ def hybrid_search_scored(
             except Exception:  # noqa: BLE001
                 logger.debug("hybrid entity boost skipped (fail-open)", exc_info=True)
 
+        # PageIndex 借鉴 A3: heading 粗召回 bonus —— "先读目录再定位"思想的
+        # 非 agent 版本。chunk.heading_path 已入库但此前不参与排序（v1 注释）；
+        # 对 distinct heading 做一次 in-process BM25（<10ms，无 LLM），命中
+        # 章节的 chunk 在融合前加性 bonus。rerank 救不了没进候选集的 chunk，
+        # 所以信号必须加在检索阶段。默认关，golden A/B 验证后再决定。
+        if getattr(settings, "kb_heading_boost", False):
+            try:
+                _h_paths = [c.heading_path or "" for c in chunks]
+                _distinct = sorted({h for h in _h_paths if h.strip()})
+                if _distinct:
+                    _h_tokens = [_tokenize(h) for h in _distinct]
+                    _h_bm25 = BM25Okapi(_h_tokens)
+                    _q_tokens = _tokenize(query)
+                    _h_scores = _h_bm25.get_scores(_q_tokens)
+                    _h_map = dict(zip(_distinct, _h_scores))
+                    _hmax = max(_h_scores) if len(_h_scores) else 0.0
+                    if _hmax > 0.0:
+                        _boosts = np.array(
+                            [(_h_map.get(h, 0.0) / _hmax) for h in _h_paths],
+                            dtype=float,
+                        )
+                        _w = float(getattr(settings, "kb_heading_boost_weight", 0.15))
+                        bm25_scores = bm25_scores + _boosts * _w
+                        cosine_scores = cosine_scores + _boosts * _w
+            except Exception:  # noqa: BLE001
+                logger.debug("hybrid heading boost skipped (fail-open)", exc_info=True)
+
         fusion = (getattr(settings, "kb_hybrid_fusion", None) or "weighted").strip().lower()
         if fusion == "rrf":
             # Wave D: Reciprocal Rank Fusion (k=60). Scores stored as RRF mass
