@@ -915,6 +915,50 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
     ("pypdf", lambda c, e: _parse_pypdf(c)),
 )
 
+# PageIndex 借鉴 P1: 不发射 <!-- page:N --> 的 tier —— 获胜后需补近似页码。
+_PAGELESS_TIERS = frozenset({"marker", "markitdown"})
+
+
+def _inject_approximate_page_markers(content: bytes, text: str) -> str:
+    """PageIndex 借鉴 P1: 对无页码 tier 的输出按字符均分插入页码 marker。
+
+    近似页码（按字符数均分，尽量在换行处切分），chunk 引用时显示页码。
+    Fail-open: 页数获取失败或文本过短时原文返回。
+    """
+    from . import pdf_local
+    from .chunking import page_marker
+
+    if not text or "<!-- page:" in text:
+        return text
+    try:
+        n_pages = int(pdf_local.page_count(content) or 0)
+    except Exception:
+        return text
+    if n_pages <= 1 or len(text.strip()) < 100:
+        return text
+    lines = text.splitlines(keepends=True)
+    total = sum(len(ln) for ln in lines)
+    if total <= 0:
+        return text
+    # 每页目标字符数，按行累积切分
+    per_page = total / n_pages
+    parts: list[str] = []
+    buf: list[str] = []
+    acc = 0
+    cur_page = 1
+    parts.append(page_marker(1))
+    for ln in lines:
+        buf.append(ln)
+        acc += len(ln)
+        if acc >= per_page * cur_page and cur_page < n_pages:
+            parts.append("".join(buf))
+            buf = []
+            cur_page += 1
+            parts.append(page_marker(cur_page))
+    if buf:
+        parts.append("".join(buf))
+    return "\n".join(parts)
+
 
 # Non-PDF tiers, in the same shape as _PDF_TIERS. This used to be a hardcoded
 # if-chain, which meant every new fallback had to be wedged into the control
@@ -1041,6 +1085,21 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                     result = None
                 if text and text.strip():
                     timing.note(parser=name)
+                    # PageIndex 借鉴 P1+P2: 无 marker 的 tier（marker/markitdown
+                    # 返回纯文本）获胜时补近似页码；补不上则记 warning。
+                    if name in _PAGELESS_TIERS:
+                        _patched = _inject_approximate_page_markers(content, text)
+                        if _patched != text:
+                            logger.info(
+                                "parse_document: tier %s 无页码，已补近似页码分段",
+                                name,
+                            )
+                            text = _patched
+                        else:
+                            logger.warning(
+                                "parse_document: PDF 经 tier %s 解析无页码信息",
+                                name,
+                            )
                     final = result if result is not None else ParseResult(text, name)
                     return _maybe_extract_tables(final, content)
             timing.note(parser="none")

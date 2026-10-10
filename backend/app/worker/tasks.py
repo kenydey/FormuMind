@@ -919,6 +919,13 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
         files_processed += 1
         if outcome.source_id:
             last_source_id = outcome.source_id
+            # PageIndex 借鉴 P6: 源文件落盘 —— 持久化原文件供"新页面打开"下载。
+            # Fail-open: 落盘失败不影响入库。
+            try:
+                from ..services.source_files import persist_source_file
+                persist_source_file(outcome.source_id, path, name)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("source file persist skipped for %s: %s", name, exc)
         last_extraction_status = outcome.extraction_status
 
     if files_processed == 0:

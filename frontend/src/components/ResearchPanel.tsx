@@ -131,11 +131,34 @@ function CitationChip({ ev }: { ev: Evidence }) {
     ev.page != null && Number.isFinite(Number(ev.page))
       ? "text-accent/80"
       : "text-slate-500";
+  // PageIndex 借鉴 P7/P8: 引用可点击，新页面打开源文件。
+  // KB 本地文档 → /api/documents/{source_id}/file#page=N（浏览器原生跳页）；
+  // 文献 → oa_pdf_url（无则 landing 页 url）。
+  const openSource = () => {
+    let href: string | null = null;
+    const kbMatch = /^kb:([^#]+)/.exec(ev.identifier || "");
+    if (kbMatch) {
+      href = `/api/documents/${encodeURIComponent(kbMatch[1])}/file`;
+      if (ev.page != null && Number.isFinite(Number(ev.page))) {
+        href += `#page=${ev.page}`;
+      }
+    } else {
+      href = ev.oa_pdf_url || ev.url || ev.url_alt || null;
+    }
+    if (href) {
+      window.open(href, "_blank", "noopener,noreferrer");
+    }
+  };
+  const clickable = /^kb:/.test(ev.identifier || "") || !!(ev.oa_pdf_url || ev.url || ev.url_alt);
   return (
     <span
-      className="inline-flex items-center gap-1 bg-accent/10 border border-accent/30 text-accent rounded px-1.5 py-0.5 text-[10px] mr-1 mb-1"
-      title={ev.snippet}
+      className={`inline-flex items-center gap-1 bg-accent/10 border border-accent/30 text-accent rounded px-1.5 py-0.5 text-[10px] mr-1 mb-1 ${
+        clickable ? "cursor-pointer hover:bg-accent/20" : ""
+      }`}
+      title={clickable ? `${ev.snippet}\n\n点击在新页面打开源文件` : ev.snippet}
       data-testid="citation-chip"
+      onClick={clickable ? openSource : undefined}
+      role={clickable ? "link" : undefined}
     >
       {ev.is_seed_corpus && (
         <span className="text-amber-400/90 shrink-0" title="离线示例摘要">

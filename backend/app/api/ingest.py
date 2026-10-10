@@ -620,3 +620,38 @@ def export_sources(body: SourceExportRequest) -> Response:
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="sources_export.{ext}"'},
     )
+
+
+@router.get("/documents/{source_id}/file")
+def get_source_file(source_id: str):
+    """PageIndex 借鉴 P6: 源文件下载 —— 浏览器内打开（inline），支持 #page=N 跳页。
+
+    前端用 window.open(url + '#page=N', '_blank') 在新页面打开并跳到指定页。
+    """
+    from fastapi.responses import FileResponse
+
+    from ..services.source_files import find_source_file
+
+    # 基础校验：source_id 格式（防路径遍历）
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source_id or ""):
+        raise HTTPException(status_code=400, detail="invalid source_id")
+    path = find_source_file(source_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="源文件不存在（可能为历史数据或非本地上传）")
+    # 按扩展名给 media_type，PDF 浏览器内打开
+    _media = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+    }
+    media_type = _media.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(
+        path,
+        media_type=media_type,
+        # inline: 浏览器内打开而非下载；PDF 阅读器支持 #page=N
+        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+    )
