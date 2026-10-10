@@ -336,6 +336,8 @@ def _apply_answer_gates(
     sourced_claims,
     verified,
     settings,
+    # D P2-4: paperqa 路径的引用格式非 [^n]，数值检查会误报，跳过。
+    is_paperqa: bool = False,
 ):
     """Apply P2-1/P2-3/P2-2 gates.
 
@@ -355,7 +357,8 @@ def _apply_answer_gates(
     notices: list[dict] = []
 
     # —— P2-1：数值一致性运行时检查 ——
-    if getattr(settings, "chat_numeric_check_enabled", True) and citations:
+    # D P2-4: paperqa 路径跳过（引用格式非 [^n]，会误报）。
+    if getattr(settings, "chat_numeric_check_enabled", True) and citations and not is_paperqa:
         try:
             evidence_texts = [
                 f"{c.title or ''} {c.snippet or ''}" for c in citations
@@ -640,6 +643,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                     history=history,
                     structure=req.structure,
                     prompt_prefix=prompt_prefix or None,
+                    retrieval_query=retrieval_query,
                 )
                 answer = _ensure_answer(answer)
             _mark("answer")
@@ -656,11 +660,14 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
                     history=history,
                     structure=req.structure,
                     prompt_prefix=prompt_prefix or None,
+                    retrieval_query=retrieval_query,
                 )
                 answer = _ensure_answer(answer)
             _mark("answer")
 
-        if clarification and clarification.possible_meanings and "按" not in answer:
+        # D P2-3: 检查具体标记而非单字"按" —— "按"太常用（按照/按标准），
+        # 单字检查导致澄清提示几乎恒被抑制。
+        if clarification and clarification.possible_meanings and "（默认按" not in answer:
             hint = clarification.possible_meanings[0]
             answer = f"{answer}\n\n（默认按「{hint}」理解；如需其他含义请说明。）"
 
@@ -1294,6 +1301,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             claims,
                             _verified,
                             settings,
+                            is_paperqa=True,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("chat/stream paperqa claims: %s", exc)

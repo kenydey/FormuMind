@@ -129,11 +129,6 @@ def _score_and_validate(
         from ..services import chemtools
 
         form.warnings.extend(chemtools.screen_formulation(form))
-        # P1-13: 危险物质降权 —— 爆炸性/管制警告触发时降分（不删除，人工确认）
-        if any("爆炸性" in w or "管制" in w for w in form.warnings):
-            if getattr(form, "score", None) is not None:
-                form.score = round(form.score * 0.5, 4)
-                form.warnings.append("安全降权：含爆炸性/管制物质嫌疑，评分已降权 50%")
     if chem_screen_local:
         # P3: 零网络本地化学预筛（RDKit 价键 + molbloom patent）——
         # 优化循环安全版，每代数百次调用不触网。
@@ -183,6 +178,13 @@ def _score_and_validate(
         from ..services.kg_recommend_score import kg_compat_adjust
 
         kg_compat_adjust(form, objectives=list(objectives) if objectives else None)
+    # E-1: 危险物质降权 —— 必须在 score 赋值之后（此前在 score 赋值前检查，
+    # getattr(form, "score", None) 恒为 None，分支永不执行，死代码）。
+    # 爆炸性/管制警告触发时降分 50%（不删除，人工确认）。
+    if any("爆炸性" in w or "管制" in w for w in form.warnings):
+        if getattr(form, "score", None) is not None:
+            form.score = round(form.score * 0.5, 4)
+            form.warnings.append("安全降权：含爆炸性/管制物质嫌疑，评分已降权 50%")
     # Batch C: always attach explain after score / optional KG adjust.
     try:
         from ..services.formulation_explain import attach_explain

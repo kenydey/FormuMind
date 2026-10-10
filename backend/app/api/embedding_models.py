@@ -167,10 +167,18 @@ def switch_status():
 
 def _switch_worker(model_id: str) -> None:
     """后台切换：更新配置 + 重建索引。"""
+    from ..services.rag import set_runtime_embedding_model
+
+    # C P2-2: 记录旧模型，重建失败时回滚 —— 否则 override 已切、语料半迁移。
+    old_model: str | None = None
+    try:
+        from ..services.rag import embed_model_name
+
+        old_model = embed_model_name()
+    except Exception:
+        pass
     try:
         # 1. 更新运行时配置
-        from ..services.rag import set_runtime_embedding_model
-
         set_runtime_embedding_model(model_id)
         with _SWITCH_LOCK:
             _SWITCH_TASK["progress"] = 5.0
@@ -190,5 +198,15 @@ def _switch_worker(model_id: str) -> None:
         logger.info("模型切换完成: %s", model_id)
     except Exception as exc:
         logger.warning("模型切换失败 %s: %s", model_id, exc)
+        # C P2-2: 回滚 runtime override，避免半迁移状态。
+        if old_model:
+            try:
+                set_runtime_embedding_model(old_model)
+                logger.info("模型切换失败，已回滚到 %s", old_model)
+            except Exception:
+                pass
         with _SWITCH_LOCK:
-            _SWITCH_TASK.update(status="failed", error=str(exc)[:500])
+            _SWITCH_TASK.update(
+                status="failed", error=str(exc)[:500],
+                partial=True,  # 语料可能半迁移，需手动恢复 .db.bak
+            )

@@ -168,6 +168,15 @@ def test_numeric_questions_asked_in_chinese_reach_the_english_document_that_answ
     assert ret["systems"]["production"]["by_category"]["numeric"]["recall@10"] == 1.0
 
 
+def test_crosslingual_does_not_regress_from_baseline(production):
+    """A-2: crosslingual 防回归门禁。双模型架构下 crosslingual 有结构性
+    上限（中文 query 无法用向量匹配英文 chunk，Cheng 决策保持双模型策略）。
+    c255714 基线 s@1=0.2222，融合改动不得低于基线。"""
+    ret, _ = production
+    s1 = ret["systems"]["production"]["by_category"]["crosslingual"]["success@1"]
+    assert s1 >= 0.2222 - 1e-9, f"crosslingual s@1 regressed: {s1}"
+
+
 def test_every_question_gets_something_back_so_the_empty_evidence_gate_never_fires_today(production):
     """Pinned as a *finding*, not an aspiration: if retrieval ever starts returning nothing for questions it cannot answer,
     this fails, and ``evals/README.md`` (what it says about the current state) needs the good news."""

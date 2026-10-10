@@ -6,6 +6,12 @@ read-only snapshot compatible with ``GET /api/tasks/{id}``.
 """
 from __future__ import annotations
 
+# G P2-3: SoftTimeLimitExceeded 需显式引入（非 TimeoutError 子类）。
+try:
+    from celery.exceptions import SoftTimeLimitExceeded as _SoftTimeLimitExceeded
+except ImportError:
+    _SoftTimeLimitExceeded = None
+
 from ..services._fsutil import atomic_write_text, read_text_with_retry
 from ..services.errors import degrade_return, log_handled_exception
 import json
@@ -605,7 +611,10 @@ def run_recommend_task(self, payload: dict) -> dict:
     soft_time_limit=2400,
     time_limit=3000,
     max_retries=2,
-    autoretry_for=(TimeoutError, ConnectionError, OSError),
+    # G P2-3: SoftTimeLimitExceeded 不是 TimeoutError 子类，soft 超时后需重试。
+    autoretry_for=(TimeoutError, ConnectionError, OSError, _SoftTimeLimitExceeded)
+    if _SoftTimeLimitExceeded
+    else (TimeoutError, ConnectionError, OSError),
     retry_backoff=True,
 )
 def run_optimize_task(self, payload: dict) -> dict:

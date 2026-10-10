@@ -250,12 +250,22 @@ def extract_pages(content: bytes, *, ocr: bool | None = None) -> list[LocalPage]
                 # v29 Phase3 M-14: 单页保护 —— 坏页不杀死整篇解析
                 try:
                     markdown = (chunk.get("text") or "").strip()
+                    text_layer = doc[index].get_text().strip()
                     n_tables, n_images, area_ratio = _page_signals(doc[index])
+                    # B-1: layout 丢弃稀疏页文本时回退到 text-layer。
+                    # 单行文本页经 layout 返回空 markdown，若直接返回空，
+                    # 上游 cascade 会落到 OCR，把完美文本层读成垃圾。
+                    if not markdown and len(text_layer) >= 20:
+                        logger.debug(
+                            "pdf_local: 第 %d 页 layout 返回空，用 text-layer 回退（%d 字符）",
+                            index + 1, len(text_layer),
+                        )
+                        markdown = text_layer
                     pages.append(
                         LocalPage(
                             page_no=index + 1,
                             markdown=markdown,
-                            char_count=len(doc[index].get_text().strip()),
+                            char_count=len(text_layer),
                             n_tables=n_tables,
                             n_images=n_images,
                             image_area_ratio=area_ratio,
@@ -392,6 +402,18 @@ def page_count(content: bytes) -> int:
             return int(doc.page_count)
     except Exception as exc:
         return degrade_return(logger, exc, "pdf_local page_count failed", 0)
+
+
+def is_encrypted(content: bytes) -> bool:
+    """P2-3: 快速检测 PDF 是否加密（无需完整解析）。"""
+    try:
+        with _open(content) as doc:
+            # _open 已处理加密标记；needs_pass 或 _formumind_encrypted 均为加密
+            if getattr(doc, "_formumind_encrypted", False):
+                return True
+            return bool(getattr(doc, "needs_pass", False))
+    except Exception:
+        return False
 
 
 def page_as_png(content: bytes, page_no: int, dpi: int = 150, *, _doc=None) -> bytes | None:

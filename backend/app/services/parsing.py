@@ -427,7 +427,6 @@ def _docx_walk_elements(
                                 # （简化：标记后由上游去重，此处直接加）
                                 parts.append(f"[文本框] {pt.strip()}")
                                 break  # 一个文本框只取一段，避免刷屏
-                                parts.append(f"[文本框] {pt.strip()}")
         elif tag == "tbl":
             t = tbl_by_el.get(child)
             if t is not None:
@@ -930,8 +929,11 @@ _PDF_TIERS: tuple[tuple[str, object], ...] = (
 _DOC_TIERS: tuple[tuple[str, object], ...] = (
     ("text", lambda c, e: _parse_text_file(c, e) if e in _ALWAYS_PARSEABLE else None),
     ("openpyxl", lambda c, e: _parse_xlsx_tables(c) if e in ("xlsx", "xlsm") else None),
-    ("markitdown", lambda c, e: _parse_markitdown(c, e)),
+    # B-2: 原生 docx walker 优先 —— markitdown 对嵌套表输出畸形（管道符嵌套
+    # 破坏表格），原生 walker 输出干净。v28/v29/v2/v3 的 DOCX 修复
+    # （嵌套表、SDT、文本框、修订标记）只在原生路径生效。
     ("docx", lambda c, e: _parse_docx(c) if e in ("docx", "doc") else None),
+    ("markitdown", lambda c, e: _parse_markitdown(c, e)),
     ("xlsx", lambda c, e: _parse_xlsx(c) if e in ("xlsx", "xlsm") else None),
 )
 
@@ -1006,6 +1008,13 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                 logger.warning("parse_document: PDF %d 页超上限 %d，拒绝解析", n, _max_pages)
                 r = ParseResult("", "none")
                 r.table_stats = {"error": f"PDF 页数超限（{_max_pages}）"}
+                return r
+            # P2-3: 加密 PDF 直接返回 —— 避免走完全部 cascade（docling→marker→
+            # mineru→rapidocr→markitdown→pypdf）每个都失败打日志，浪费时间。
+            if pdf_local.is_encrypted(content):
+                logger.info("parse_document: PDF 已加密，需密码，跳过解析链")
+                r = ParseResult("", "none")
+                r.table_stats = {"error": "PDF 已加密，需提供密码后重新上传"}
                 return r
         except Exception:
             pass  # 页数获取失败，交由解析链处理

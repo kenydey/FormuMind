@@ -91,6 +91,10 @@ def _campaign_loop_context(
     requirement，会用当前数据（records + rmse）重新跑 evaluate_convergence。
     数据变了（新测量打破 target/plateau 条件）→ 返回未收敛，允许继续迭代。
     重估失败时 fail-open：信任历史 flag（保持旧行为）。
+
+    G P2-1 语义说明：历史因 rmse_plateau 收敛，但当前无模型数据时，
+    重估返回未收敛 → 闭环"复活"。这是设计使然（数据变了就该重估），
+    不是 bug。如需严格保持历史收敛态，调用方应传入 requirement=None。
     """
     from ..db.campaign_store import get_campaign_store
 
@@ -157,7 +161,8 @@ def campaign_loop_status(campaign_id: int) -> dict[str, Any]:
         return {"status": "idle", "rounds": 0, "converged": False, "message": "campaign_missing"}
 
     history = list(getattr(camp, "loop_history", None) or [])
-    rounds = len(history)
+    # G P2-2: rounds 排除 running entry —— 正在进行的条目不算完成轮次。
+    rounds = sum(1 for h in history if (h or {}).get("status") != "running")
     pause = pause_store.read_state(int(campaign_id))
     paused = pause.paused
     last = history[-1] if history else None

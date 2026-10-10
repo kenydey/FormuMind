@@ -108,7 +108,9 @@ def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
         if reason == "target_achieved"
         else "模型 RMSE 已收敛 — 保留上一轮 DOE，无需新实验建议"
     )
-    notes += f"（共 {len(levers)} 个因子，取各因子中点）"
+    # G P2-4: 空 levers 时不加"共 0 个因子"后缀。
+    if levers:
+        notes += f"（共 {len(levers)} 个因子，取各因子中点）"
     return DOEPlan(
         design="converged-hold",
         factors=factors,

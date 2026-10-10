@@ -53,6 +53,17 @@ def reindex_for_model(
     bak = db_path.with_suffix(f".db.bak.{int(time.time())}")
     shutil.copy2(db_path, bak)
     logger.info("已备份 DB: %s", bak)
+    # C P2-3: 备份 retention —— 只保留最近 3 个，避免磁盘堆积。
+    try:
+        _baks = sorted(
+            db_path.parent.glob(db_path.name + ".bak.*"),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for _old in _baks[:-3]:
+            _old.unlink()
+            logger.info("清理旧备份: %s", _old)
+    except Exception:
+        pass
 
     # 2. 加载模型（离线优先，失败则在线）
     import os
@@ -79,13 +90,16 @@ def reindex_for_model(
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM document_chunks")
     total = cur.fetchone()[0]
+    # C P2-4: 分页读取 —— 全表 fetchall 在 10 万 chunk 级内存爆炸。
+    # ORDER BY id 保证分页稳定。
     cur.execute("SELECT id, text FROM document_chunks ORDER BY id")
-    rows = cur.fetchall()
 
     done = 0
     t0 = time.time()
-    for i in range(0, len(rows), batch):
-        batch_rows = rows[i : i + batch]
+    while True:
+        batch_rows = cur.fetchmany(batch)
+        if not batch_rows:
+            break
         texts = [(r[1] or "")[:8000] for r in batch_rows]
         vecs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
         for (cid, _), vec in zip(batch_rows, vecs):

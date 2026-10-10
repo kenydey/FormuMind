@@ -48,7 +48,9 @@ def select_diverse_mmr(
 
     remaining = list(forms)
     selected: list[Formulation] = [remaining.pop(0)]
-    max_score = max((f.score or 0.0) for f in forms) or 1.0
+    # E P2-1: 全负分时符号翻转 —— max_score 为负时 norm_score 符号翻转，
+    # 最差的候选反而最高。用绝对值归一化。
+    max_score = max(abs(f.score or 0.0) for f in forms) or 1.0
 
     while len(selected) < n and remaining:
         best_idx = 0

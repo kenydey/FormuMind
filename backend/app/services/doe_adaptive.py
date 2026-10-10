@@ -8,6 +8,7 @@ from ..domain.schemas import (
     ExperimentRecord,
     Requirement,
 )
+from .convergence import primary_objective_spec
 from .doe_anomaly import detect_anomalies
 from .doe_explain import (
     build_run_explanations,
@@ -138,10 +139,13 @@ def build_adaptive_metadata(
     strategy_label, strategy_rationale = infer_strategy(n_completed, budget_remaining=budget_remaining)
     constraint_warnings = _constraint_warnings_for_runs(req, plan)
     if acquisition_scores is None and any(r.ai_suggested for r in plan.runs):
+        # F-1: direction 接线 —— minimize 目标的 EI 方向此前恒为 maximize。
+        _dir = primary_objective_spec(req).direction
         acquisition_scores = legacy_acquisition_scores(
             plan,
             existing,
             n_suggest=len([r for r in plan.runs if r.ai_suggested]),
+            direction=_dir,
         )
 
     anomalies = detect_anomalies(req, existing)

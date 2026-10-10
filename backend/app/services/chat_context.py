@@ -12,12 +12,19 @@ logger = logging.getLogger(__name__)
 
 _CAS_RE = re.compile(r"\b(\d{2,7}-\d{2}-\d)\b")
 _FOLLOWUP_MARKERS = re.compile(
-    r"(它|其|该|此|这个|那个|上面|上述|前者|后者|怎么样|如何|多少|呢|吗)",
+    r"(它|其|该|此|这个|那个|上面|上述|前者|后者|怎么样|如何|多少)",
     re.IGNORECASE,
 )
+# D P2-5: "吗/呢" 是疑问语气词，不必然表示指代 —— 仅短问句（≤12 字）
+# 才视为 follow-up 信号，避免"磷酸锌好吗？"这类独立问句误触发重写。
+_FOLLOWUP_QUESTION_PARTICLES = re.compile(r"(呢|吗)", re.IGNORECASE)
 _CHEM_TOKEN_RE = re.compile(
     r"(磷酸锌|环氧树脂|固化剂|防锈颜料|乳液|牌号|盐雾|添加量|wt%|实施例|[A-Za-z]{2,}[- ]?\d{2,4})"
 )
+# D P2-1 备注（2026-10-10）：曾尝试扩展白名单（锌黄/环氧底漆等），但导致
+# test_anaphora_substitutes_pronoun 失败 —— "环氧底漆"加入后，代词"它"被
+# 消解为最近提及的"环氧底漆"而非主题"磷酸锌"。白名单扩展需配合消解
+# 优先级调整（如主题优先于最近提及），暂回退，记为已知限制。
 
 # P2: 可消解的代词 —— 排除"应该"（应+该）、"尤其"（尤+其）、
 # "其他/其它/其余/其中"（其+他/它/余/中，非指代）。
@@ -146,12 +153,18 @@ def rewrite_query(
             return q, None
 
         needs_context = bool(_FOLLOWUP_MARKERS.search(q)) or len(q) <= 24
+        # D P2-5: "吗/呢" 仅短问句才视为 follow-up 信号。
+        if not needs_context and _FOLLOWUP_QUESTION_PARTICLES.search(q) and len(q) <= 12:
+            needs_context = True
         if not needs_context:
             return q, None
 
         # P2: 真正的指代消解 —— 代词替换成先行词，而不仅是前置词条。
         resolved_q = _resolve_anaphora(q, context_turns, clarified_entities or [])
-        rewritten = f"{' '.join(terms)} {resolved_q}".strip()
+        # D P2-2: 去掉已在 resolved_q 出现的词条，避免"防锈颜料 防锈颜料"重复。
+        _seen = set(resolved_q.split())
+        _dedup_terms = [t for t in terms if t not in _seen]
+        rewritten = f"{' '.join(_dedup_terms)} {resolved_q}".strip()
         if rewritten == q:
             return q, None
         return rewritten, rewritten

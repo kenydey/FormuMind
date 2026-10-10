@@ -48,7 +48,25 @@ class ClaimCheckResult(BaseModel):
 
 
 def _token_set(text: str) -> set[str]:
-    return {t.lower() for t in _TOKEN_RE.findall(text) if len(t) > 1}
+    # D-1: CJK 二元组分词 —— 中文连续字符若作为单个 token，
+    # 明显被支撑的论断会被误判 unsupported（推高拒答率、污染 sources_audit）。
+    out: set[str] = set()
+    for t in _TOKEN_RE.findall(text):
+        t = t.lower()
+        if len(t) <= 1:
+            continue
+        if any("\u4e00" <= ch <= "\u9fff" for ch in t):
+            # 含 CJK：字符二元组
+            chars = [ch for ch in t if "\u4e00" <= ch <= "\u9fff" or ch.isalnum()]
+            for i in range(len(chars) - 1):
+                out.add(chars[i] + chars[i + 1])
+            # 保留 ASCII 部分（如英文术语）
+            ascii_part = "".join(ch for ch in t if ord(ch) < 128).strip()
+            if len(ascii_part) > 1:
+                out.add(ascii_part)
+        else:
+            out.add(t)
+    return out
 
 
 def extract_claims(text: str, *, max_claims: int | None = None) -> list[str]:

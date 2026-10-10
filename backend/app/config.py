@@ -919,7 +919,7 @@ class Settings(BaseSettings):
     kb_snippet_max_chars: int = 0
     # 推荐/研究图检索时并入的持久 KB chunk 数（0 = 关闭该融合）。
     kb_recommend_top_k: int = 4
-    # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.3）。
+    # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.85）。
     kb_hybrid_alpha: float = 0.85
     # P2 A/B: hybrid 融合前化学实体加成（CAS/分子式/牌号/SMILES）。
     # legacy search_chunks 的加性 0.2/0.3 是按 cosine 0-1 尺度调的，直接加到

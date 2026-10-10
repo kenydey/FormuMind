@@ -79,9 +79,11 @@ def plan_to_xlsx(plan: DOEPlan, metrics: list[str]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = f"DOE-{plan.design}"[:31]
-    ws.append(headers)
+    # F-2: XLSX 公式注入防护 —— 与 CSV 同口径，=+-@ 开头加单引号前缀。
+    # openpyxl 会把 "=1+1" 存为 data_type='f'（Excel 打开即执行）。
+    ws.append([_sanitize_csv_cell(h) for h in headers])
     for row in _export_rows(plan, headers):
-        ws.append(row)
+        ws.append([_sanitize_csv_cell(c) for c in row])
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()

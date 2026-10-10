@@ -282,7 +282,11 @@ class _CampaignMetaMixin:
                 return True
 
     def update_last_loop_entry_sync(self, campaign_id: int, updates: dict) -> bool:
-        """原地更新 loop_history 最后一个 entry（用于 running → 终态）。"""
+        """原地更新 loop_history 最后一个 entry（用于 running → 终态）。
+
+        G-1: 保留原 entry 的 round —— 调用方传的 updates 里 "round": 0
+        只是占位，不能覆盖 running entry 已分配的 round 号。
+        """
         with self._write_lock:
             with commit_session(self._session_factory) as session:
                 campaign = session.get(Campaign, campaign_id)
@@ -292,7 +296,10 @@ class _CampaignMetaMixin:
                 if not history:
                     return False
                 entry = dict(history[-1])
+                _orig_round = entry.get("round")
                 entry.update(updates)
+                if _orig_round is not None:
+                    entry["round"] = _orig_round
                 entry.pop("running", None)
                 history[-1] = entry
                 campaign.loop_history = history

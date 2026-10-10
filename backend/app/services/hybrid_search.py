@@ -74,6 +74,10 @@ def record_hybrid_latency_ms(ms: float) -> None:
         return
     if v < 0:
         return
+    # P2-3: 跳过冷启动样本 —— 首次查询含 embedding 模型加载（实测 2700ms+），
+    # 会污染 p95 导致 ANN gate 误触发。正常查询远低于此阈值。
+    if v > 2000.0:
+        return
     with _LATENCY_LOCK:
         _LATENCY_MS.append(v)
 
@@ -309,6 +313,11 @@ def _faiss_vector_scores(
             pool = pool * 3
         out: dict[str, float] = {}
         for model in buckets:
+            # C P2-1: 跳过 "" bucket —— embedding_model 为 NULL 的行混在
+            # 默认模型 bucket 里，维度对但模型身份不明，cosine 是垃圾。
+            # 这些行走暴力/keyword 兜底。
+            if not model:
+                continue
             vecs = kb_index._embed_texts(
                 [bge_query_prefix(model) + query], model or None
             )
@@ -491,6 +500,9 @@ def hybrid_search_scored(
         # 系统性偏低）；联合归一化会系统性压制某一语言的文档，导致 RRF/
         # weighted 融合失真。分组归一化后，每组分数为"在自己空间内相对
         # 最优的相似度"，组间可比。单模型语料只有一组，行为不变。
+        # A-1 复核（2026-10-10）：曾尝试全局归一化，但导致 numeric recall@10
+        # 1.0→0.9583 回归 —— 跨语言场景下英文 chunk 的 MiniLM 分数系统性偏低，
+        # 分组归一化恰好补偿了这种偏差。恢复分组归一化。
         _model_groups: dict[str, list[int]] = {}
         for _i, _c in enumerate(chunks):
             _model_groups.setdefault(

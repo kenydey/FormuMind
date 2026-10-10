@@ -418,6 +418,15 @@ export default function ActionsPanel() {
               >
                 {busy === "optimizing" ? "寻优中…" : "运行 DOE 寻优闭环"}
               </button>
+              {busy === "optimizing" && (
+                <button
+                  type="button"
+                  onClick={() => useStore.getState().cancelOptimize()}
+                  className={"w-full mt-1 " + CANCEL_BUTTON_CLASS}
+                >
+                  ✕ 取消寻优
+                </button>
+              )}
               {busy === "optimizing" && taskThinking.length > 0 && (
                 <ThinkingTimeline steps={taskThinking} title="寻优思考链路" />
               )}

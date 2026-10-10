@@ -846,6 +846,11 @@ class BaybeCampaignEngine:
                     )
                 )
 
+            # G-2: 全失败时 ranked 为空 —— 抛异常触发 workflow 的 BayBE→numpy
+            # 降级链。否则返回空 top，前端拿到空结果且降级不触发。
+            if not ranked:
+                raise RuntimeError("baybe: all runs skipped in batch, no candidates scored")
+
             if progress_cb:
                 progress_cb((r + 1) / rounds, f"baybe batch {r + 1}/{rounds}: best={best_so_far:.3f}")
 

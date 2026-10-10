@@ -1878,6 +1878,10 @@ def answer_question(
     history: list | None = None,
     structure: dict | None = None,
     prompt_prefix: str | None = None,
+    # D-2: query 重写接线 —— 同步路径的 BM25 重排此前用原问句，
+    # 流式路径用重写后的 retrieval_query。多轮追问（"它的盐雾性能如何？"）
+    # 同步路径排序依据含未消解代词。调用方传重写后 query 则用它重排。
+    retrieval_query: str | None = None,
 ) -> tuple[str, list[Evidence]]:
     """Answer a user question grounded in the provided sources.
 
@@ -1901,7 +1905,9 @@ def answer_question(
     store = build_store()
     store.ingest(sources)
     candidates_n = min(settings.chat_rerank_candidates, max(1, len(sources)))
-    recalled = store.query(question, k=candidates_n) or sources[:candidates_n]
+    # D-2: 重排用重写后的 query（若调用方提供），否则用原问句。
+    _rerank_q = retrieval_query or question
+    recalled = store.query(_rerank_q, k=candidates_n) or sources[:candidates_n]
 
     relevant = recalled[: settings.chat_rerank_top_k]
     if bool(getattr(settings, "chat_cross_encoder_enabled", False)) and recalled:

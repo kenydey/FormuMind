@@ -1596,6 +1596,11 @@ def reset_loop(
         raise HTTPException(status_code=404, detail="Campaign not found") from None
     if not reset_campaign_loop(campaign_id):
         raise HTTPException(status_code=404, detail="Campaign not found")
+    # G P2-10: reset 审计日志 —— 手动清空 loop_history 是破坏性操作，需留痕。
+    logger.warning(
+        "reset-loop: campaign %s 的 loop_history 已被用户 %s 手动清空",
+        campaign_id, get_current_owner(request),
+    )
     return {"status": "success", "message": f"Loop history reset for campaign {campaign_id}"}
 
 

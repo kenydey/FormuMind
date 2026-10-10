@@ -518,7 +518,15 @@ def prepare_chunk_rows(
             c for c in chunks
             if len(c.text.strip()) > 30
             or (is_formula_text(c.text, c.block_type) and len(c.text.strip()) >= formula_floor)
-        ][: settings.kb_max_chunks_per_source]
+        ]
+        # P2-5: 超长文档截断记 warning（此前静默丢弃尾部 chunk）。
+        _cap = int(settings.kb_max_chunks_per_source or 0)
+        if _cap > 0 and len(chunks) > _cap:
+            logger.warning(
+                "kb index_source: %s chunk 数 %d 超上限 %d，截断尾部 %d 个",
+                source_id, len(chunks), _cap, len(chunks) - _cap,
+            )
+            chunks = chunks[:_cap]
         if not chunks:
             return None
 
@@ -881,11 +889,19 @@ def reindex_all(*, embed: bool = True) -> dict:
             # P1-5: 默认 prune_source_fulltext=True 会清空 full_text ——
             # 从现存 chunk 行按 ord 拼回原文，而非静默跳过（否则默认
             # 配置下 reindex 恒返回 0）。
-            text = "\n\n".join(
-                (c.text or "").strip()
-                for c in chunk_store.get_by_source(source_id)
-                if (c.text or "").strip()
-            )
+            # C-1: 拼回时按 chunk 的 heading_path 补标题行 —— chunk 文本
+            # 不含 "#" 标题标记（被 _split_sections 消费为分隔符），
+            # 否则重切后全部 chunk 的 heading_path 丢失。
+            _parts = []
+            for c in chunk_store.get_by_source(source_id):
+                _t = (c.text or "").strip()
+                if not _t:
+                    continue
+                _hp = getattr(c, "heading_path", None)
+                if _hp:
+                    _parts.append(f"# {_hp}")
+                _parts.append(_t)
+            text = "\n\n".join(_parts)
         if not text:
             continue
         n = index_source(source_id, text, embed=embed)

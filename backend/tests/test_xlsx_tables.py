@@ -174,7 +174,7 @@ def test_a_file_too_large_to_hold_cell_by_cell_goes_to_the_streaming_converters(
     monkeypatch.setattr(parsing, "_XLSX_TABLES_MAX_SHEET_BYTES", 10)  # a small file declaring a huge sheet
     assert parsing._parse_xlsx_tables(content) is None
     monkeypatch.undo()
-    monkeypatch.setattr(parsing, "_XLSX_TABLES_MAX_CELLS", 3)
+    monkeypatch.setattr(parsing, "_XLSX_TABLES_MAX_CELLS_PER_SHEET", 3)
     assert parsing._parse_xlsx_tables(content) is None
 
 
