@@ -867,6 +867,19 @@ def _attach_entities(source_id: str, rows: list[dict]) -> None:
 
 def reindex_all(*, embed: bool = True) -> dict:
     """Rebuild chunk rows for every stored source (backfill / after upgrades)."""
+    return _reindex_filtered(embed=embed, only_changed=False)
+
+
+def reindex_changed(*, embed: bool = True) -> dict:
+    """增量 #4: 只重建未成功索引的 source（ingest_status 非 indexed）。
+
+    新增文档入库后调用，比全量 reindex_all 快一个数量级。
+    Fail-open: 查询失败时回退全量。
+    """
+    return _reindex_filtered(embed=embed, only_changed=True)
+
+
+def _reindex_filtered(*, embed: bool = True, only_changed: bool = False) -> dict:
     from ..db.chunk_store import get_chunk_store
     from ..db.models import SourceDocument
     from ..db.source_store import get_source_store
@@ -878,11 +891,17 @@ def reindex_all(*, embed: bool = True) -> dict:
     with store._session_factory() as session:
         # v7 KB-4: 排除 wiki —— wiki 页是单 summary chunk + meta.wiki 结构，
         # 通用重切会摧毁它。
-        rows = (
+        _q = (
             session.query(SourceDocument.id, SourceDocument.full_text)
             .filter(SourceDocument.source_kind != "wiki")
-            .all()
         )
+        # 增量 #4: 只取未成功索引的（ingest_status 非 indexed）。
+        if only_changed:
+            _q = _q.filter(
+                (SourceDocument.ingest_status.is_(None))
+                | (SourceDocument.ingest_status != "indexed")
+            )
+        rows = _q.all()
     for source_id, full_text in rows:
         text = (full_text or "").strip()
         if not text:

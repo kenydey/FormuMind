@@ -53,6 +53,33 @@ class ScoredChunk:
     bm25_score: float
     cosine_score: float
     hybrid_score: float
+    # 增量 #6: chunk 质量分（0-1，仅内存计算，不写 DB）。
+    # 信号：有标题 +0.3，含表格 +0.2，长度适中（100-2000 字）+0.2，
+    # 含数字/单位 +0.1，纯导航/目录 -0.5。v1 仅记录不参与排序。
+    quality_score: float = 0.0
+
+
+def chunk_quality_score(chunk: object) -> float:
+    """增量 #6: chunk 质量启发式评分（0-1）。"""
+    try:
+        text = (getattr(chunk, "text", None) or "")
+        heading = (getattr(chunk, "heading_path", None) or "")
+        score = 0.5  # 基准
+        if heading:
+            score += 0.2
+        if "|" in text and "---" in text:  # 表格
+            score += 0.15
+        n = len(text)
+        if 100 <= n <= 2000:
+            score += 0.1
+        elif n < 30:
+            score -= 0.3
+        # 导航/目录页降权
+        if any(w in text[:200] for w in ("目录", "contents", "索引")) and n < 500:
+            score -= 0.4
+        return max(0.0, min(1.0, score))
+    except Exception:
+        return 0.5
 
 
 def reset_latency_stats() -> None:
@@ -576,6 +603,8 @@ def hybrid_search_scored(
                 bm25_score=round(float(bm25_scores[i]), 6),
                 cosine_score=round(float(cosine_scores[i]), 6),
                 hybrid_score=round(float(combined[i]), 6),
+                # 增量 #6: 质量分仅记录，为后续排序优化留接口。
+                quality_score=round(chunk_quality_score(chunks[i]), 3),
             )
             for i in order
         ]

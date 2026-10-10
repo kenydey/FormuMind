@@ -579,3 +579,24 @@ def test_deliberate_ocr_refuses_a_document_past_the_page_cap(
     """One long scan must not be able to consume a whole ingest run."""
     assert pdf_local.ocr_markdown(three_page_pdf, max_pages=2) is None
     assert pdf_local.ocr_markdown(three_page_pdf, max_pages=3) is not None
+
+
+def test_sparse_page_falls_back_to_text_layer() -> None:
+    """B-1: 单行文本的稀疏页，layout 返回空 markdown 时回退到 text-layer。
+
+    若直接返回空，上游 cascade 会落到 OCR，把完美文本层读成垃圾。
+    """
+    doc = pymupdf.open()
+    page = doc.new_page()
+    # 单行长文本（≥20 字符），layout 可能判为空
+    page.insert_text(
+        (72, 90),
+        "This is a sparse page with a single line of text content here.",
+        fontsize=11,
+    )
+    content = doc.tobytes()
+
+    pages = pdf_local.extract_pages(content)
+    assert pages, "稀疏页应被提取"
+    text = " ".join(p.markdown or "" for p in pages)
+    assert "sparse page" in text, f"稀疏页文本丢失: {text[:100]}"

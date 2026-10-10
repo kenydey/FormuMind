@@ -755,3 +755,43 @@ def confirm_embodiment_draft(body: ConfirmEmbodimentDraftRequest) -> dict:
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("reason") or "confirm_failed")
     return out
+
+
+@router.get("/formulations/recommend/quality-dashboard")
+def recommend_quality_dashboard(days: int = 30) -> dict:
+    """增量 #10: 推荐质量看板 —— 采纳率、验证率、趋势。
+
+    供管理后台展示。默认近 30 天。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..db.database import default_session_factory
+    from ..db.models import RecommendOutcomeRow
+
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    factory = default_session_factory()
+    with factory() as session:
+        rows = (
+            session.query(RecommendOutcomeRow)
+            .filter(RecommendOutcomeRow.created_at >= since)
+            .all()
+        )
+    total = len(rows)
+    adopted = sum(1 for r in rows if r.adopted)
+    validated = sum(1 for r in rows if getattr(r, "experiment_validated", False))
+    # 按天聚合
+    by_day: dict[str, dict] = {}
+    for r in rows:
+        day = r.created_at.strftime("%Y-%m-%d")
+        d = by_day.setdefault(day, {"total": 0, "adopted": 0})
+        d["total"] += 1
+        if r.adopted:
+            d["adopted"] += 1
+    return {
+        "days": days,
+        "total_recommendations": total,
+        "adopted": adopted,
+        "adopt_rate": round(adopted / total, 4) if total else 0.0,
+        "experiment_validated": validated,
+        "by_day": by_day,
+    }

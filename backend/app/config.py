@@ -637,6 +637,9 @@ class Settings(BaseSettings):
     chat_structured_enabled: bool = True
     chat_clarification_enabled: bool = True
     chat_claim_check_enabled: bool = True
+    # 增量 #7: 子问题分解（多跳检索）—— 复杂问题拆成子问题多路检索。
+    # 默认关闭（需 LLM 调用，有延迟）；开启后仅对长问题（>40 字）生效。
+    chat_subquestions_enabled: bool = False
     # P2-2 — 证据不足拒答硬门：unsupported claim 占比超阈值或零召回时，
     # 用拒答模板替换答案（直接上硬门，无 report-only 过渡）。
     chat_abstention_threshold: float = 0.5
@@ -921,6 +924,9 @@ class Settings(BaseSettings):
     kb_recommend_top_k: int = 4
     # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.85）。
     kb_hybrid_alpha: float = 0.85
+    # 增量 #11: 推荐 A/B 实验开关。开启后按用户 ID 哈希分流，
+    # 实验组用不同 MMR 多样性参数。默认关闭。
+    recommend_ab_enabled: bool = False
     # P2 A/B: hybrid 融合前化学实体加成（CAS/分子式/牌号/SMILES）。
     # legacy search_chunks 的加性 0.2/0.3 是按 cosine 0-1 尺度调的，直接加到
     # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做加性，

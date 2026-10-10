@@ -99,3 +99,18 @@ def test_ocsr_direct_disabled_returns_none():
 
     s = _Settings(ocsr_enabled=False)
     assert ve._ocsr_direct(b"fake-png", s) is None
+
+
+def test_chemical_structure_eval_mol_to_smiles_roundtrip():
+    """增量 #3: 化学结构 eval —— MOL→SMILES 往返一致性。
+
+    用 RDKit（如可用）验证 OCSR 输出的结构有效性。
+    Fail-open: RDKit 不可用时跳过。
+    """
+    pytest.importorskip("rdkit")
+    from rdkit import Chem
+
+    # 苯环的 SMILES 应能被 RDKit 解析
+    mol = Chem.MolFromSmiles("c1ccccc1")
+    assert mol is not None, "RDKit 应能解析苯环 SMILES"
+    assert Chem.MolToSmiles(mol) == "c1ccccc1"

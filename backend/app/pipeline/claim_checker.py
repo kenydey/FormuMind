@@ -133,6 +133,32 @@ def _source_tags_for_indices(evidence: list[Evidence], indices: list[int]) -> li
     return tags
 
 
+def _split_claim_segments(claim: str) -> list[str]:
+    """增量 #9: 长 claim 按分句切分，逐段验证可定位不支持片段。"""
+    import re
+
+    parts = re.split(r"[。！？；;!?\n]+", claim)
+    segs = [p.strip() for p in parts if len(p.strip()) >= 8]
+    return segs if len(segs) > 1 else [claim]
+
+
+def verify_claim_offline_segmented(
+    claim: str, evidence: list[Evidence]
+) -> list[VerifiedClaim]:
+    """增量 #9: 分段验证 —— 长 claim 逐段验证，返回每段结果。
+
+    调用方可定位具体哪段不支持，而非整句判 unsupported。
+    Fail-open: 切分失败时回退整句验证。
+    """
+    try:
+        segments = _split_claim_segments(claim)
+    except Exception:
+        segments = [claim]
+    if len(segments) == 1:
+        return [verify_claim_offline(claim, evidence)]
+    return [verify_claim_offline(seg, evidence) for seg in segments]
+
+
 def verify_claim_offline(claim: str, evidence: list[Evidence]) -> VerifiedClaim:
     claim_tokens = _token_set(claim)
     if not claim_tokens:

@@ -210,6 +210,21 @@ def _augment_with_kb(
     hits = bilingual_search(
         question, k=settings.kb_chat_top_k, project_id=project_id
     )
+    # 增量 #7: 子问题分解 —— 长问题拆成子问题，多路检索后合并。
+    # opt-in（chat_subquestions_enabled），fail-open。
+    if not hits and getattr(settings, "chat_subquestions_enabled", False) and len(question) > 40:
+        try:
+            from ..pipeline.subquestions import decompose, merge_evidence
+            from ..services.kb_bilingual import search as _bi_search
+
+            _subs = decompose(question, 3, domain="")
+            _batches = []
+            for _sq in _subs[1:]:  # [0] 是原问题，已检索过
+                _batches.append(_bi_search(_sq, k=settings.kb_chat_top_k, project_id=project_id))
+            if _batches:
+                hits = merge_evidence([hits] + _batches)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("subquestions retrieval skipped: %s", exc)
     if not hits:
         return sources, wiki_added, resolution, kg_stats
     seen = {ev.identifier for ev in sources}
