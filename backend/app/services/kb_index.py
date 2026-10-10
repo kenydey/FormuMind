@@ -936,7 +936,8 @@ def _chunk_to_evidence(chunk, source_meta: dict, score: float) -> Evidence:
         identifier=f"kb:{chunk.source_id}#c{chunk.ord}",
         title=title[:200],
         snippet=chunk_snippet(chunk.text),
-        relevance=max(0.05, min(1.0, round(score, 4))),
+        # P2-1: 去掉 relevance 下限钳制（0.05 遗留自 RRF 时代，weighted 下抹平尾部区分度）
+        relevance=max(0.0, min(1.0, round(score, 4))),
         page=int(page) if page is not None else None,
         paragraph=int(paragraph) if paragraph is not None else None,
     )
@@ -1255,9 +1256,8 @@ def search_chunks_hybrid(
             return []
         # v10: 调用方已传 meta 则复用，否则自己查（_source_meta 是全表扫描）。
         meta = source_meta if source_meta is not None else _source_meta()
-        # v10: RRF 模式 hybrid_score ~0.01-0.03，会被 _chunk_to_evidence 的
-        # max(0.05, …) 全部钳成 0.05，排名信息在 Evidence 层被抹平。
-        # RRF 分数按本次 batch max 归一化后再转 Evidence，保留相对排序。
+        # v10: RRF 模式 hybrid_score ~0.01-0.03，按本次 batch max 归一化后再转 Evidence，
+        # 保留相对排序。默认 weighted 下分数 0-1，此分支不执行。
         scores = [float(s.hybrid_score) for s in scored]
         if (getattr(settings, "kb_hybrid_fusion", "weighted") or "weighted").strip().lower() == "rrf":
             _mx = max(scores) if scores else 0.0

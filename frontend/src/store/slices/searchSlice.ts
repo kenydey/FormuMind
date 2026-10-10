@@ -508,7 +508,12 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
           selected_mcp_servers: st.selectedMcpServers || [],
           chat_session_id: st.activeSessionId || undefined,
         };
-        await api.chatStream(reqBody, (ev) => {
+        // P0-3: 前端超时 + AbortController —— 后端 hang 住时不再无限转圈
+        const ctrl = new AbortController();
+        const timeoutMs = 5 * 60 * 1000;
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+          await api.chatStream(reqBody, (ev) => {
           const last = (d: { chatHistory: ChatMessage[] }) =>
             d.chatHistory[d.chatHistory.length - 1];
           if (ev.type === "phase") {
@@ -636,7 +641,10 @@ export function createSearchSlice(set: SliceSet, get: SliceGet) {
               draft.error = ev.message;
             });
           }
-        });
+          }, { signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
       } catch (e) {
         const msg = formatApiError(e);
         const hint =

@@ -64,8 +64,10 @@ def search(
             )
         if langs == ["zh"] and settings.kb_query_translate:
             return _zh_with_translation(question, k=k, project_id=project_id, settings=settings)
+        # P1-f: bilingual 统一走 hybrid —— legacy 路径绕过 per-model 归一化等调优，
+        # 行为不一致。legacy 已 deprecate。
         return kb_index.retrieve_evidence(
-            question, k=k, project_id=project_id, mode="legacy", langs=langs
+            question, k=k, project_id=project_id, mode="hybrid", langs=langs
         )
     except Exception:
         # 双语路径异常 → 降级 hybrid 全查

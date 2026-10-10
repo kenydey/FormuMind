@@ -1568,6 +1568,9 @@ export const apiMethods = {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+    // P0-3: 跟踪是否收到终结事件（done/error），EOF 无终结则抛错，
+    // 避免 UI 永久 streaming 卡死。
+    let terminated = false;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1581,11 +1584,16 @@ export const apiMethods = {
           .find((l) => l.startsWith("data: "));
         if (!line) continue; // 心跳注释行等
         try {
-          onEvent(JSON.parse(line.slice(6)) as ChatStreamEvent);
+          const ev = JSON.parse(line.slice(6)) as ChatStreamEvent;
+          if (ev.type === "done" || ev.type === "error") terminated = true;
+          onEvent(ev);
         } catch {
           // 单条事件解析失败不中断整个流
         }
       }
+    }
+    if (!terminated) {
+      throw new Error("chat stream terminated without done/error event");
     }
   },
 

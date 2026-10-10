@@ -121,6 +121,8 @@ def build_sources_audit(
     verified: list[VerifiedClaim] | None = None,
     sourced_claims: list[SourcedClaim] | None = None,
     enabled: bool = True,
+    # P1-l: 未验证 claim 计数（长答案超 _MAX_CLAIMS 截断时尾部逃逸）
+    n_unverified: int = 0,
 ) -> dict[str, Any] | None:
     """Wave D — claim→passage audit table (fail-open when disabled)."""
     if not enabled:
@@ -161,10 +163,11 @@ def build_sources_audit(
                 "partial": 0,
                 "unsupported": 0,
                 "contradicted": 0,
+                "unverified": n_unverified,
             },
         }
 
-    summary = {"supported": 0, "partial": 0, "unsupported": 0, "contradicted": 0}
+    summary = {"supported": 0, "partial": 0, "unsupported": 0, "contradicted": 0, "unverified": n_unverified}
     for row in rows:
         g = str(row.get("grade") or "unsupported")
         if g in summary:

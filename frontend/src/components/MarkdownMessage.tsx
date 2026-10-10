@@ -102,6 +102,10 @@ function MarkdownMessage({
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, ...rehypePlugins]}
         components={{ ...base, ...extra }}
+        // P1-g: XSS 防护 —— 拦截 javascript:/data: 等危险协议
+        urlTransform={(url) =>
+          /^(https?:|mailto:|#)/i.test(url) ? url : "#"
+        }
       >
         {content}
       </ReactMarkdown>

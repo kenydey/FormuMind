@@ -571,6 +571,10 @@ def classify_intent(question: str) -> dict:
     "unstructured" (literature retrieval over the knowledge base).
     """
     q = question or ""
+    # P1-k: "…的方法"/"如何…"结尾是文献问法（问方法不是问数据），强制 unstructured，
+    # 避免"查询耐蚀性提升的方法"被误判为 hybrid
+    if q.rstrip("？?。！! ").endswith("的方法") or q.strip().startswith("如何"):
+        return {"route": "unstructured", "reason": "以方法/如何问法结尾，文献性问题"}
     has_struct = any(s in q for s in _STRUCTURED_SIGNALS)
     has_domain = any(s in q for s in _DOMAIN_SIGNALS)
     has_lit = any(s in q for s in _LITERATURE_SIGNALS)
@@ -724,9 +728,12 @@ def hybrid_answer(
             ev = retrieve(question, k=6, project_id=project_id) or []
         except Exception as exc:
             log.warning("text2sql evidence retrieval failed: %s", exc)
-    data_sources = ["kb_evidence"]
+    # P1-b: data_sources 如实反映 —— 无证据时不谎报 kb_evidence
+    data_sources = []
     if sql_text:
-        data_sources = ["structured_sql", "kb_evidence"]
+        data_sources.append("structured_sql")
+    if ev:
+        data_sources.append("kb_evidence")
     return {
         "route": route,
         "route_reason": decision["reason"],

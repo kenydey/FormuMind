@@ -206,7 +206,8 @@ async def answer_with_paperqa_async(
                 answer = await docs.aquery(question)
         text = getattr(answer, "answer", None) or str(answer)
         cited = [by_key[k] for k in by_key if k in (getattr(answer, "context", "") or "")]
-        return text, (cited or sources[:6])
+        # P1-a: 引用诚实性 —— 未解析出引用时返回空，不用无关 source 充数
+        return text, cited
     except Exception as exc:  # noqa: BLE001
         return degrade_return(logger, exc, "paperqa engine failed", None)
 

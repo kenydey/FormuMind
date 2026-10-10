@@ -76,6 +76,9 @@ def _reviewer_notices(reviewer) -> list[str]:
     """v16 P3-11: reviewer fail-open 时给用户可见提示（不再静默）。"""
     if _reviewer_failed(reviewer):
         return ["证据评审未完成（reviewer 异常），回答未经第二轮校验"]
+    # P2: reviewer 为 None（跳过）时也明确告知，不再静默
+    if reviewer is None:
+        return ["证据评审未运行（已跳过），回答未经第二轮校验"]
     return []
 
 
@@ -144,10 +147,10 @@ class ChatRequestValidated(ChatRequest):
     def _coerce_history(cls, raw: object) -> object:
         if not isinstance(raw, list):
             return raw
-        from ..config import get_settings
 
-        cap = get_settings().chat_history_max_turns
-        items = raw[-cap:] if len(raw) > cap else raw
+        # P2-2: validator 只做超大保护（200 条），精细截断（token budget+摘要）留给 trim_history
+        hard_cap = 200
+        items = raw[-hard_cap:] if len(raw) > hard_cap else raw
         out: list[dict] = []
         for item in items:
             if isinstance(item, ChatTurn):
@@ -263,8 +266,13 @@ def _claims_and_audit(
         getattr(settings, "sources_audit_enabled", True)
     ):
         try:
+            # P1-l: 计算未验证 claim 数（答案总句数 - 实际验证数）
+            from ..services.chat_claims import _SENTENCE_SPLIT
+
+            _total = len([p for p in _SENTENCE_SPLIT.split(answer or "") if p.strip()])
+            _n_unverified = max(0, _total - len(verified))
             sources_audit = build_sources_audit(
-                evidence, verified=verified, enabled=True
+                evidence, verified=verified, enabled=True, n_unverified=_n_unverified
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("sources_audit skipped: %s", exc)
@@ -374,7 +382,7 @@ def _apply_answer_gates(
                     if not cnums:
                         return False
                     for f in failures:
-                        m = _re.match(r"([0-9]+(?:\.[0-9]+)?)", f["claim"])
+                        m = _re.search(r"([0-9]+(?:\.[0-9]+)?)", f["claim"])
                         if not m:
                             continue
                         fv = float(m.group(1))
@@ -432,6 +440,26 @@ def _apply_answer_gates(
         n_unsupported = sum(
             1 for v in verified if v.verdict == ClaimVerdict.unsupported
         )
+    elif verified is None:
+        # P0-1: 拒答门去耦合 claim-check —— claim-check 关闭时不能静默放行。
+        # 回退到引用启发式：引用整体过弱（max relevance<0.3）或单条中等引用（<2条且<0.5）则拒答。
+        # 单条强引用（≥0.5）仍放行，避免误杀。
+        n_cit = len(citations)
+        try:
+            relevances = [
+                float(c.get("relevance", 0.5) if isinstance(c, dict) else getattr(c, "relevance", 0.5))
+                for c in citations
+            ]
+        except Exception:
+            relevances = []
+        max_rel = max(relevances) if relevances else 0.0
+        if max_rel < 0.3 or (n_cit < 2 and max_rel < 0.5):
+            should_abstain = True
+            logger.info(
+                "chat abstention gate fired (claim-check off, citation heuristic): "
+                "citations=%d max_relevance=%.3f",
+                n_cit, max_rel,
+            )
     threshold = adaptive_abstention_threshold(
         base_threshold,
         estimate_difficulty(question=question, answer=gated_answer, n_claims=n_claims),
@@ -448,6 +476,8 @@ def _apply_answer_gates(
             reason = _ABSTAIN_REASON_NO_EVIDENCE + "，"
         gated_answer = _ABSTAIN_TEMPLATE.format(reason=reason)
         abstained = True
+        # P1-c: 拒答时清空 claims —— 避免前端收到"证据不足"+被丢弃答案的 claims
+        sourced_claims = []
         logger.info(
             "chat abstention gate fired: citations=%d claims=%d unsupported=%d threshold=%.2f",
             len(citations or []),
@@ -870,11 +900,20 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
         question, history, req.clarified_entities, settings=settings
     )
 
-    # BM25 召回(与 answer_question 同款; 不再 LLM rerank)。
+    # BM25 召回(与 answer_question 同款)。
     store = build_store()
     store.ingest(sources)
     candidates_n = min(settings.chat_rerank_candidates, max(1, len(sources)))
     recalled = store.query(retrieval_query, k=candidates_n) or sources[:candidates_n]
+    # P1-d: cross-encoder 精排接入 —— BM25 粗排后精排，fail-open（模型未缓存则跳过）
+    try:
+        from ..services.rag import rerank_scored
+
+        reranked, _meta = rerank_scored(retrieval_query, recalled, k=candidates_n)
+        if reranked:
+            recalled = [r.evidence for r in reranked]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("chat rerank skipped: %s", exc)
     relevant = recalled[: settings.chat_rerank_top_k]
 
     # Up-3: 主路径接入 query 压缩（fail-open；压缩后 prompt 与 plan["relevant"]
@@ -1107,6 +1146,10 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
     api_key = settings.get_active_api_key() or ""
 
     async def gen():
+        import time
+
+        # P2-3: 后端总 deadline（10 分钟）—— 缓慢但持续的流不会无限占线程
+        _deadline = time.monotonic() + 600
         if not api_key:
             # Running without a key is a supported mode (QUICKSTART: "with no key, everything still runs via the
             # offline rule engine") and POST /api/chat answers it with an excerpt of the loaded sources. The UI only
@@ -1177,6 +1220,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                                 {
                                     "type": "done",
                                     "answer": _chart.answer,
+                                    # P2-3: chart 路径显式 notices 字段（前端防御性处理）
                                     "citations": [],
                                     "chart_vlm": {
                                         "pages_used": _chart.pages_used,
@@ -1194,7 +1238,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 return
         except Exception as exc:
             logger.warning("chat/stream 准备失败: %s", exc)
-            yield _sse({"type": "error", "message": f"检索失败: {str(exc)[:200]}"})
+            # P1-h: 错误消息泛化 —— 内部细节只记日志，不发前端
+            yield _sse({"type": "error", "code": "retrieval_failed", "message": "检索失败，请重试"})
             return
 
         # Evidence mode: try PaperQA async before token stream.
@@ -1285,7 +1330,10 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             "evidence_provenance": evidence_provenance,
                             "evidence_reviewer": reviewer,
                             "reviewer_fix": reviewer_fix,
-                            "notices": gate_notices or None,
+                            # P1-j: 补 degradation notices（与其他路径对齐）
+                            "notices": list(_retrieval_degradation_notices(kb_used) or [])
+                            + list(gate_notices or [])
+                            + _reviewer_notices(reviewer) or None,
                         }
                     )
                     return
@@ -1540,6 +1588,14 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 parts: list[str] = []
                 try:
                     while True:
+                        # P0-2: 客户端断开检测 —— 用户关页面后不再空转烧 token
+                        # P2-3: 总 deadline 检查
+                        if request is not None and await request.is_disconnected():
+                            logger.info("chat_stream: client disconnected, aborting chem-tools loop")
+                            break
+                        if time.monotonic() > _deadline:
+                            yield _sse({"type": "error", "code": "deadline_exceeded", "message": "回答超时，请重试"})
+                            break
                         kind, payload = await asyncio.wait_for(queue.get(), timeout=240)
                         if kind == "ev":
                             ev = payload
@@ -1750,6 +1806,14 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
             parts: list[str] = []
             try:
                 while True:
+                    # P0-2: 客户端断开检测
+                    # P2-3: 总 deadline 检查
+                    if request is not None and await request.is_disconnected():
+                        logger.info("chat_stream: client disconnected, aborting token loop")
+                        break
+                    if time.monotonic() > _deadline:
+                        yield _sse({"type": "error", "code": "deadline_exceeded", "message": "回答超时，请重试"})
+                        break
                     kind, payload = await asyncio.wait_for(queue.get(), timeout=120)
                     if kind == "tok":
                         parts.append(payload)
@@ -1772,7 +1836,8 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
             if "error" in result_holder:
                 err = result_holder["error"]
                 logger.warning("chat/stream LLM 失败: %s", err)
-                yield _sse({"type": "error", "message": f"生成失败: {err}"})
+                # P1-h: 错误消息泛化
+                yield _sse({"type": "error", "code": "generation_failed", "message": "生成失败，请重试"})
                 return
 
             answer = "".join(parts).strip()
