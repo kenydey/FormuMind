@@ -8,6 +8,8 @@
 约定：
 - ``evaluate_convergence`` 返回 ``(converged, reason)``，
   ``reason`` ∈ ``{"target_achieved", "rmse_plateau", ""}``；
+  （``doe_cycle_runs.convergence_reason`` 列还可能有 ``"budget_exhausted"``，
+  那是 DOE 周期硬停写入的，不经过本模块。）
 - 目标达成优先于平台期（与原 auto_loop 语义一致）；
 - ``None`` 数据永不判收敛（fail-open）。
 """
@@ -80,7 +82,11 @@ def best_objective_value(
 
 
 def primary_objective_spec(req: Requirement) -> ObjectiveSpec:
-    """Primary objective: req.objectives[0], else a target-less default."""
+    """Primary objective: req.objectives[0], else a target-less default.
+
+    注意：收敛判定只看主目标（objectives[0]）。其余目标的 target_value
+    不参与收敛判定（多目标权衡走 Pareto/加权分，不走收敛门）。
+    """
     from ..domain.project_spec import primary_objective
 
     objectives = getattr(req, "objectives", None) or []

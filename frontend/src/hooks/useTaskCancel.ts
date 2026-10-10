@@ -1,10 +1,11 @@
 import { useStore } from "../store";
 
-/** Kinds that support unified cancel via store (loop/recommend/deep_research)
+/** Kinds that support unified cancel via store (loop/recommend/deep_research/optimize)
  *  or local AbortController + api.cancelTask (storm / kg_relations). */
 export const CANCELABLE_TASK_KINDS = [
   "loop",
   "recommend",
+  "optimize",
   "deep_research",
   "wiki_storm_report",
   "kg_relations_rebuild",
@@ -22,12 +23,13 @@ export function coldStartMessage(stage: string | undefined, message: string | un
 export function useTaskCancel() {
   const task = useStore((s) => s.task);
   const cancelLoopTask = useStore((s) => s.cancelLoopTask);
+  const cancelOptimize = useStore((s) => s.cancelOptimize);
   const cancelResearch = useStore((s) => s.cancelResearch);
   const cancelDeepResearch = useStore((s) => s.cancelDeepResearch);
 
   const kind = task?.kind;
   const storeCancelable =
-    kind === "loop" || kind === "recommend" || kind === "deep_research";
+    kind === "loop" || kind === "recommend" || kind === "optimize" || kind === "deep_research";
   const canCancel = Boolean(
     task && storeCancelable && task.state !== "cancelled" && task.state !== "completed" && task.state !== "failed",
   );
@@ -35,6 +37,7 @@ export function useTaskCancel() {
   const handleCancel = () => {
     if (!task) return;
     if (kind === "loop") void cancelLoopTask();
+    else if (kind === "optimize") void cancelOptimize();
     else if (kind === "recommend") void cancelResearch();
     else if (kind === "deep_research") void cancelDeepResearch();
     else {

@@ -76,6 +76,13 @@ def test_should_trigger_respects_project_or(monkeypatch):
 
 
 def test_campaign_loop_status_converged_stops_dispatch(_sqlite_backend):
+    """收敛重估语义：history 的 converged 只是上次判定的快照。
+
+    - 数据仍支持收敛 → 不 dispatch（旧行为保持）
+    - 数据不再支持收敛（新测量打破 target）→ dispatch 继续（新行为）
+    """
+    from app.domain.schemas import ExperimentRecord, ObjectiveSpec
+
     client = TestClient(app)
     created = client.post(
         "/api/experiments/workbench/campaigns", json={"plan": _plan().model_dump()}
@@ -101,13 +108,55 @@ def test_campaign_loop_status_converged_stops_dispatch(_sqlite_backend):
     assert st2["converged"] is True
     assert st2["rounds"] == 1
 
+    req = Requirement(
+        domain=ProductDomain.anticorrosion_coating,
+        objectives=[
+            ObjectiveSpec(
+                metric="salt_spray_hours", direction="maximize", target_value=1000.0
+            )
+        ],
+        levers=[],
+    )
+
+    # 场景 A：当前数据仍达标（1200 >= 1000）→ 重估仍收敛 → 不 dispatch
+    registry._store.add(  # noqa: SLF001
+        [
+            ExperimentRecord(
+                domain=ProductDomain.anticorrosion_coating,
+                factors={},
+                measured={"salt_spray_hours": 1200.0},
+            )
+        ]
+    )
+    registry.load()
     task_id, msg = workbench_loop.dispatch_loop_after_sync(
         training_ingested=1,
         workbench_campaign_id=cid,
         trigger_loop=True,
+        requirement=req,
     )
     assert task_id is None
     assert "收敛" in msg
+
+    # 场景 B：新数据不达标（800 < 1000）→ 重估判未收敛 → dispatch 继续
+    registry._store.clear()  # noqa: SLF001
+    registry._store.add(  # noqa: SLF001
+        [
+            ExperimentRecord(
+                domain=ProductDomain.anticorrosion_coating,
+                factors={},
+                measured={"salt_spray_hours": 800.0},
+            )
+        ]
+    )
+    registry.load()
+    task_id2, msg2 = workbench_loop.dispatch_loop_after_sync(
+        training_ingested=1,
+        workbench_campaign_id=cid,
+        trigger_loop=True,
+        requirement=req,
+    )
+    assert task_id2 is not None, f"重估后应继续 dispatch，got msg={msg2}"
 
 
 def test_project_workspace_auto_loop_triggers_without_explicit_flag(_sqlite_backend):

@@ -241,6 +241,7 @@ def _prepare_measurement_dataframe(df, metrics: list[str], expected_params: list
 def _fps_select(df, k: int) -> list[int]:
     """v16 P3-14: Farthest Point Sampling —— 从 df 选 k 个在因子空间最分散的行。
 
+    调用方只传因子列（不含指标列），否则 FPS 会偏向预测值极端的点。
     用于冷启动先验点的多样性选点。fail-open：异常时返回前 k 个索引。
     """
     try:
@@ -484,6 +485,7 @@ class BaybeCampaignEngine:
         if not df_meas.empty and metrics:
             df_meas = align_dataframe_measurement_columns(df_meas, metrics, log=log)
 
+        _df_wb_cleaned = None
         if workbench_campaign_id is not None:
             actual_X, measurements_Y = fetch_campaign_data_for_baybe(
                 workbench_campaign_id, req, store=campaign_store
@@ -499,6 +501,7 @@ class BaybeCampaignEngine:
                     df_wb, metrics,
                     expected_params=[f.name for f in factor_list],
                 )
+                _df_wb_cleaned = df_wb
                 import pandas as pd
 
                 df_meas = (
@@ -525,6 +528,29 @@ class BaybeCampaignEngine:
             df_meas_clean, [f.name for f in factor_list], log,
             metric_names=metrics,
         )
+        # P2-4: lab_points_used 用 REAL_SOURCES 去重后计数。
+        # df_meas_clean 混入了 baybe_opt 内部反馈（v18-1），不能直接 len()。
+        # 单独对 lab 部分（measurements 的 REAL_SOURCES + workbench 通道）
+        # 走一遍清洗去重，计数与"实际进 GP 的 lab 行数"一致。
+        import pandas as pd
+
+        _df_lab = records_to_dataframe(measurements, req, objectives)
+        if _df_wb_cleaned is not None and not _df_wb_cleaned.empty:
+            _df_lab = (
+                pd.concat([_df_lab, _df_wb_cleaned], ignore_index=True)
+                if not _df_lab.empty
+                else _df_wb_cleaned
+            )
+        if not _df_lab.empty:
+            _df_lab = _prepare_measurement_dataframe(
+                _df_lab, metrics,
+                expected_params=[f.name for f in factor_list],
+            )
+            _df_lab = _dedupe_measurement_frame(
+                _df_lab, [f.name for f in factor_list], log,
+                metric_names=metrics,
+            )
+        _lab_points_deduped = len(_df_lab)
         # v16 P2-3: 去重后日志（计数与实际进 GP 一致）。
         if workbench_campaign_id is not None:
             log.info(
@@ -571,7 +597,10 @@ class BaybeCampaignEngine:
                 # 冷启动先验点应在因子空间均匀散布，而非取 LHS 的前 3 个。
                 # TODO(P3-14): 先验仍与 predictor 同源；理想是无信息 prior。
                 try:
-                    _fps_idx = _fps_select(virtual, min(3, len(virtual)))
+                    # 只用因子列做 FPS（指标列会偏向预测极端值，违背"因子空间均匀"意图）。
+                    _factor_cols = [f.name for f in factor_list if f.name in virtual.columns]
+                    _fps_frame = virtual[_factor_cols] if _factor_cols else virtual
+                    _fps_idx = _fps_select(_fps_frame, min(3, len(virtual)))
                     virtual = virtual.iloc[_fps_idx]
                 except Exception:  # noqa: BLE001 - fail-open
                     virtual = virtual.head(min(3, len(virtual)))
@@ -669,8 +698,8 @@ class BaybeCampaignEngine:
             physical_constraints=phys_verdict,
             # v15: 实际喂给 add_measurements 的 lab 点数（去重后，含 df_wb 通道）
             # v19-fix: 只计 REAL_SOURCES，不含 baybe_opt（v18-1 回归修复）。
-            # _lab_n 是去重前计数，用于 measurement_source 诚实性判定已足够。
-            lab_points_used=_lab_n,
+            # P2-4: 用去重后计数（UI 显示"吸收了 N 条实验数据"不虚高）。
+            lab_points_used=_lab_points_deduped,
         )
         from ..doe_adaptive import enrich_baybe_result
 
@@ -772,15 +801,20 @@ class BaybeCampaignEngine:
             _max_lab_points = max(_max_lab_points, result.lab_points_used)
 
             for run in result.plan.runs:
-                run_process = dict(process)
-                for k in ("cure_temperature_c", "cure_time_min"):
-                    if k in run.natural:
-                        run_process[k] = run.natural[k]
-                form = _score_and_validate(
-                    reconstruct.formulation_from_factors(req, run.natural),
-                    run_process,
-                    req,
-                )
+                try:
+                    run_process = dict(process)
+                    for k in ("cure_temperature_c", "cure_time_min"):
+                        if k in run.natural:
+                            run_process[k] = run.natural[k]
+                    form = _score_and_validate(
+                        reconstruct.formulation_from_factors(req, run.natural),
+                        run_process,
+                        req,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # 单个坏点跳过，不拖死整轮 BayBE（降级重跑浪费算力）。
+                    log.warning("baybe run skipped: %s", exc)
+                    continue
                 for m, val in form.predicted.items():
                     lo, hi = bounds.get(m, (val, val))
                     bounds[m] = (min(lo, val), max(hi, val))

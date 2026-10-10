@@ -102,12 +102,13 @@ def _stub_doe(req: Requirement, reason: str = "rmse_plateau") -> DOEPlan:
             return lev.levels[len(lev.levels) // 2]
         return round((lev.low + lev.high) / 2, 3)
 
-    natural = {lev.name: _stub_natural(lev) for lev in levers[:6]}
+    natural = {lev.name: _stub_natural(lev) for lev in levers}
     notes = (
         "目标已达成 — 保留上一轮 DOE，无需新实验建议"
         if reason == "target_achieved"
         else "模型 RMSE 已收敛 — 保留上一轮 DOE，无需新实验建议"
     )
+    notes += f"（共 {len(levers)} 个因子，取各因子中点）"
     return DOEPlan(
         design="converged-hold",
         factors=factors,

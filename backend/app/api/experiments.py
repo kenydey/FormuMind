@@ -1577,6 +1577,28 @@ def campaign_rounds(
     )
 
 
+@router.post("/experiments/hooks/reset-loop/{campaign_id}", response_model=Dict[str, Any])
+def reset_loop(
+    campaign_id: int,
+    request: Request,
+) -> Dict[str, Any]:
+    """清空 campaign 的 loop_history，允许收敛后手动重启闭环。
+
+    自动路径是 dispatch 时的收敛重估（数据变了会自动恢复）；这个接口是手动兜底：
+    用户改了目标/想从头迭代时调用。404 = campaign 不存在。
+    """
+    from ..middleware.api_auth import assert_owner, get_current_owner
+    from ..services.workbench_loop import reset_campaign_loop
+
+    try:
+        assert_owner(campaign_owner(campaign_id), get_current_owner(request))
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found") from None
+    if not reset_campaign_loop(campaign_id):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return {"status": "success", "message": f"Loop history reset for campaign {campaign_id}"}
+
+
 # ── Pause/Resume DOE cycle hooks ─────────────────────────────────────────
 class DoeCyclePauseRequest(BaseModel):
     isPaused: bool = False

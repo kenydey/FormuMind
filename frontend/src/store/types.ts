@@ -333,6 +333,8 @@ export interface AppState {
   /** W5: clear loop failure and dispatch a fresh iterate. */
   retryLoop: () => Promise<void>;
   cancelLoopTask: () => Promise<void>;
+  /** 取消进行中的优化任务（后端 revoke + 持久化 CANCELLED）。 */
+  cancelOptimize: () => Promise<void>;
   runDoeCycle: () => Promise<void>;
   runNextRoundDoe: () => Promise<void>;
   setAutoLoopOnSync: (enabled: boolean) => void;

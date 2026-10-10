@@ -71,7 +71,11 @@ class ObjectiveSpec(BaseModel):
         if not self.id:
             object.__setattr__(self, "id", self.metric or uuid4().hex[:8])
         if self.direction not in {d.value for d in ObjectiveDirection}:
-            object.__setattr__(self, "direction", "maximize")
+            # v29 M-6 意图：非法 direction 不静默转 maximize，抛错让 pydantic 转 422。
+            raise ValueError(
+                f"invalid direction {self.direction!r}: "
+                f"expected one of {sorted(d.value for d in ObjectiveDirection)}"
+            )
         return self
 
 

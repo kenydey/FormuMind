@@ -56,6 +56,11 @@ class Factor:
     low: float
     high: float
 
+    def __post_init__(self) -> None:
+        # 倒置边界时 np.clip(min>max) 静默返回 max，错得离谱。fail-fast。
+        if self.low > self.high:
+            raise ValueError(f"Factor {self.name!r}: low ({self.low}) > high ({self.high})")
+
     def clip(self, x: float) -> float:
         return float(np.clip(x, self.low, self.high))
 

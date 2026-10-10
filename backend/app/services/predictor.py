@@ -446,6 +446,15 @@ def multi_objective_score(
     total, total_weight = 0.0, 0.0
     for obj in objectives:
         val = props.get(obj.metric, 0.0)
+        if obj.metric not in bounds:
+            # 缺 bounds 时 (0,1) 归一化无意义。当前调用方都传了 proper bounds，
+            # 这里记 warning 做纵深防御。
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "multi_objective_score: missing bounds for metric %r, using (0,1)",
+                obj.metric,
+            )
         lo, hi = bounds.get(obj.metric, (0.0, 1.0))
         rng = hi - lo
         norm = (val - lo) / rng if rng > 1e-9 else 0.5

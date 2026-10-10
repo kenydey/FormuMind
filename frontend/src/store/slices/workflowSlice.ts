@@ -69,8 +69,9 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
           campaignState,
           workbenchCampaignId
         );
-        // Optimize can run multi-minute Bayesian loops; no wall-clock limit.
-        // Stall clock (5 min silence) still catches a dead worker.
+        // Optimize can run multi-minute Bayesian loops; wall-clock 上限 50 分钟
+        // （与后端 time_limit=3000s 对齐，留余量）。Stall clock（5 min silence）
+        // 仍负责捕捉 dead worker。
         const final = await awaitTaskStream(
           task_id,
           (ev) =>
@@ -79,7 +80,7 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
               const steps = extractThinkingSteps(ev);
               if (steps.length) draft.taskThinking = steps;
             }),
-          0,
+          50 * 60 * 1000,
           undefined,
           5 * 60 * 1000
         );
@@ -215,6 +216,18 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
     },
 
     cancelLoopTask: async () => {
+      const { task } = get();
+      if (!task?.task_id) return;
+      try {
+        await api.cancelTask(task.task_id);
+      } catch (e) {
+        set((draft) => {
+          draft.error = formatApiError(e);
+        });
+      }
+    },
+
+    cancelOptimize: async () => {
       const { task } = get();
       if (!task?.task_id) return;
       try {
@@ -763,5 +776,5 @@ export function createWorkflowSlice(set: SliceSet, get: SliceGet) {
         });
       }
     },
-  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'setWikiDossierAutoPatch' | 'setPredictionBiasSoftCorrect' | 'setAgentContext' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
+  } as Pick<AppState, 'runOptimize' | 'runLoop' | 'followLoopTask' | 'retryLoop' | 'cancelLoopTask' | 'cancelOptimize' | 'runDoeCycle' | 'runNextRoundDoe' | 'adoptDoePlanToWorkbench' | 'setAutoLoopOnSync' | 'setAutoLoopMaxRounds' | 'setAutoAdoptNextDoeOnLoop' | 'setWikiDossierAutoPatch' | 'setPredictionBiasSoftCorrect' | 'setAgentContext' | 'applyIntent' | 'generateDoe' | 'setDoeEngine' | 'setAlEngine' | 'setOptimizeEngine' | 'setLoopDoeEngine' | 'setMeasured' | 'refreshWorkbenchStats' | 'ensureWorkbenchCampaign' | 'selectWorkbenchCampaign' | 'submitResults' | 'refreshModels' | 'refreshTrainingStatus' | 'recomputePredicted' | 'exportDoe' | 'importCsv'>;
 }

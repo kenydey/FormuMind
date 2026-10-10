@@ -270,6 +270,35 @@ class _CampaignMetaMixin:
     def append_loop_history_sync(self, campaign_id: int, entry: dict) -> None:
         self._append_loop_history(campaign_id, entry)
 
+    def clear_loop_history_sync(self, campaign_id: int) -> bool:
+        """清空 campaign 的 loop_history（收敛后手动重启）。返回 False 表示 campaign 不存在。"""
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return False
+                campaign.loop_history = []
+                campaign.updated_at = _utcnow()
+                return True
+
+    def update_last_loop_entry_sync(self, campaign_id: int, updates: dict) -> bool:
+        """原地更新 loop_history 最后一个 entry（用于 running → 终态）。"""
+        with self._write_lock:
+            with commit_session(self._session_factory) as session:
+                campaign = session.get(Campaign, campaign_id)
+                if campaign is None:
+                    return False
+                history = list(campaign.loop_history or [])
+                if not history:
+                    return False
+                entry = dict(history[-1])
+                entry.update(updates)
+                entry.pop("running", None)
+                history[-1] = entry
+                campaign.loop_history = history
+                campaign.updated_at = _utcnow()
+                return True
+
     def _update_campaign_status(self, campaign_id: int, rows: list[WorkbenchRow]) -> None:
         with self._write_lock:
             with commit_session(self._session_factory) as session:

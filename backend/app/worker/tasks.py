@@ -599,7 +599,15 @@ def run_recommend_task(self, payload: dict) -> dict:
         raise
 
 
-@celery_app.task(bind=True, name="formumind.optimize")
+@celery_app.task(
+    bind=True,
+    name="formumind.optimize",
+    soft_time_limit=2400,
+    time_limit=3000,
+    max_retries=2,
+    autoretry_for=(TimeoutError, ConnectionError, OSError),
+    retry_backoff=True,
+)
 def run_optimize_task(self, payload: dict) -> dict:
     task_id = self.request.id
     tracker = ThinkingTracker(task_id, kind="optimize")
@@ -1259,9 +1267,11 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
         )
         # round_no 由 _append_loop_history 内部以 len(history)+1 单一真相源计算，
         # 不在两个独立读改写点各算一次（避免 TOCTOU 与 JSON 列丢失更新）。
+        # 若最后一个 entry 是 running 占位（任务开始时写入），本轮就是它的 round。
+        _hist = list(campaign.loop_history or []) if campaign is not None else []
         round_no = (
-            len(campaign.loop_history or []) + 1 if campaign is not None else None
-        )
+            len(_hist) if (_hist and _hist[-1].get("running")) else len(_hist) + 1
+        ) if campaign is not None else None
         if not getattr(next_doe, "plan_id", None):
             next_doe.plan_id = uuid.uuid4().hex
         doe_plan_id = next_doe.plan_id
@@ -1295,7 +1305,19 @@ def _persist_loop_history(campaign_id: int | None, report) -> None:
     try:
         store = get_campaign_store()
         if hasattr(store, "append_loop_history_sync"):
-            store.append_loop_history_sync(campaign_id, entry)
+            # 任务开始时写过 running entry（run_loop_iterate_impl）：原地更新，
+            # 不新增 round，避免 rounds 计数膨胀。
+            last_running = False
+            try:
+                camp = store.get_campaign_sync(campaign_id)
+                hist = list(getattr(camp, "loop_history", None) or [])
+                last_running = bool(hist and hist[-1].get("running"))
+            except Exception:  # noqa: BLE001
+                last_running = False
+            if last_running and hasattr(store, "update_last_loop_entry_sync"):
+                store.update_last_loop_entry_sync(campaign_id, entry)
+            else:
+                store.append_loop_history_sync(campaign_id, entry)
     except Exception as exc:
         log_handled_exception(logger, exc, "persist loop_history")
 
@@ -1320,6 +1342,23 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
             return err
 
         # req 构造在 try 内：payload 校验失败也要走失败持久化。
+        # 任务开始先写 running 占位 entry，让 campaign_loop_status 能报"进行中"；
+        # 结束时 _persist_loop_history 会原地更新它（不膨胀 rounds）。
+        if campaign_id is not None:
+            try:
+                from datetime import UTC, datetime
+
+                from ..db.campaign_store import get_campaign_store
+
+                _store = get_campaign_store()
+                if hasattr(_store, "append_loop_history_sync"):
+                    _store.append_loop_history_sync(
+                        int(campaign_id),
+                        {"running": True, "at": datetime.now(UTC).isoformat()},
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+
         req = Requirement(**payload["requirement"])
 
         def progress(p: float, msg: str) -> None:
@@ -1367,6 +1406,29 @@ def run_loop_iterate_impl(task_id: str, payload: dict) -> dict:
         err = {"error": str(exc)}
         persist_result(task_id, err, failed=True)
         _persist_terminal(task_id, "loop", err, failed=True, message=str(exc))
+        # 失败时也把 running 占位 entry 转为终态，避免 status 永远卡在"进行中"。
+        try:
+            _cid = payload.get("workbench_campaign_id")
+            if _cid is not None:
+                from datetime import UTC, datetime
+
+                from ..db.campaign_store import get_campaign_store
+
+                _store = get_campaign_store()
+                _camp = _store.get_campaign_sync(int(_cid))
+                _hist = list(getattr(_camp, "loop_history", None) or [])
+                if _hist and _hist[-1].get("running"):
+                    _store.update_last_loop_entry_sync(
+                        int(_cid),
+                        {
+                            "at": datetime.now(UTC).isoformat(),
+                            "converged": False,
+                            "error": str(exc)[:500],
+                            "loop_message": f"闭环任务失败：{str(exc)[:200]}",
+                        },
+                    )
+        except Exception:  # noqa: BLE001
+            pass
         raise
 
 

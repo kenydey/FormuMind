@@ -12,9 +12,8 @@ def _numerical_target(obj: ObjectiveSpec):
     if direction == "match_target" and obj.target_value is not None:
         match_val = float(obj.target_value)
         sigma = max(1.0, abs(match_val) * 0.05)
-        if hasattr(NumericalTarget, "match_bell"):
-            return NumericalTarget.match_bell(obj.metric, match_value=match_val, sigma=sigma)
-        return NumericalTarget(name=obj.metric, mode="MATCH", bounds=(match_val, match_val))
+        # BayBE 0.15 起 match_bell 恒存在；零宽 MATCH bound 分支已删（死代码）。
+        return NumericalTarget.match_bell(obj.metric, match_value=match_val, sigma=sigma)
 
     if direction == "minimize":
         try:

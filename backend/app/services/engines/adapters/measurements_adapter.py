@@ -49,10 +49,9 @@ def records_to_dataframe(
         if rec.cure_temperature_c is not None and "cure_temperature_c" not in row:
             row["cure_temperature_c"] = rec.cure_temperature_c
         for metric in metrics:
-            value = rec.measured.get(metric)
-            if value is None and metric == metrics[0] and rec.measured:
-                value = next(iter(rec.measured.values()), None)
-            row[metric] = value
+            # 缺失即 None，不凑数：用其他指标的值填主指标是不同量纲的造假，
+            # 会静默污染 GP 训练数据。下游清洗会丢弃全 NaN 行。
+            row[metric] = rec.measured.get(metric)
         rows.append(row)
     return pd.DataFrame(rows)
 

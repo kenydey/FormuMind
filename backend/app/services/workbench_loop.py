@@ -82,8 +82,16 @@ def requirement_from_campaign(campaign: Any) -> Requirement:
     )
 
 
-def _campaign_loop_context(campaign_id: int) -> tuple[list[dict[str, float]], bool, str]:
-    """Return (prior_rmse_history, converged, message) from campaign loop_history."""
+def _campaign_loop_context(
+    campaign_id: int, requirement: Requirement | None = None
+) -> tuple[list[dict[str, float]], bool, str]:
+    """Return (prior_rmse_history, converged, message) from campaign loop_history.
+
+    收敛重估：history[-1].converged 只是"上次判定"的快照。如果调用方传了
+    requirement，会用当前数据（records + rmse）重新跑 evaluate_convergence。
+    数据变了（新测量打破 target/plateau 条件）→ 返回未收敛，允许继续迭代。
+    重估失败时 fail-open：信任历史 flag（保持旧行为）。
+    """
     from ..db.campaign_store import get_campaign_store
 
     settings = get_settings()
@@ -101,6 +109,33 @@ def _campaign_loop_context(campaign_id: int) -> tuple[list[dict[str, float]], bo
         if entry.get("rmse_by_metric")
     ]
     if history and history[-1].get("converged"):
+        if requirement is not None:
+            try:
+                from .auto_loop import _rmse_by_metric
+                from .convergence import evaluate_convergence, primary_objective_spec
+                from .training import registry
+
+                domain = getattr(requirement, "domain", None)
+                records = registry.records_for(domain) if domain is not None else []
+                _, current_rmse = _rmse_by_metric(domain) if domain is not None else ([], {})
+                converged, _reason = evaluate_convergence(
+                    prior_rmse_history=prior_rmse,
+                    current_rmse=current_rmse or None,
+                    records=records,
+                    objective=primary_objective_spec(requirement),
+                    enabled=True,
+                    eps=settings.loop_convergence_eps,
+                    patience=settings.loop_convergence_patience,
+                )
+                if not converged:
+                    logger.info(
+                        "loop re-evaluation for campaign %s: no longer converged, resuming",
+                        campaign_id,
+                    )
+                    return prior_rmse, False, ""
+            except Exception as exc:  # noqa: BLE001
+                # fail-open：重估失败时信任历史收敛状态。
+                logger.debug("loop re-evaluation failed for campaign %s: %s", campaign_id, exc)
         msg = str(history[-1].get("loop_message") or "闭环已收敛，建议停止迭代")
         return prior_rmse, True, msg
     return prior_rmse, False, ""
@@ -198,15 +233,20 @@ def dispatch_loop_after_sync(
     if is_doecycle_paused(workbench_campaign_id):
         return None, "闭环未启动：DOE 周期已暂停"
 
-    prior_rmse, converged, conv_msg = _campaign_loop_context(workbench_campaign_id)
-    if converged:
-        return None, conv_msg
-
+    # 收敛重估需要 requirement，先构建（fail-open：构建失败则退化为历史 flag）。
     req = requirement
     if req is None:
         if campaign is None:
             return None, "闭环未启动：Campaign 不存在"
-        req = requirement_from_campaign(campaign)
+        try:
+            req = requirement_from_campaign(campaign)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("requirement_from_campaign failed for %s: %s", workbench_campaign_id, exc)
+            req = None
+
+    prior_rmse, converged, conv_msg = _campaign_loop_context(workbench_campaign_id, req)
+    if converged:
+        return None, conv_msg
 
     # P1-6: 原子消耗一次轮数；达上限则不 dispatch 并明确提示。
     # 显式 trigger_loop=True（用户手动勾选）不受轮数上限约束。
@@ -296,6 +336,25 @@ def _safe_loop(task_id: str, payload: dict) -> None:
             _persist_terminal(task_id, "loop", err, failed=True, message=str(exc))
         except Exception:
             logger.exception("failed to mark task as failed")
+
+
+# ── Loop history reset ──────────────────────────────────────────────────
+def reset_campaign_loop(campaign_id: int) -> bool:
+    """清空 campaign 的 loop_history，允许收敛后重启闭环。
+
+    收敛重估（_campaign_loop_context）是自动路径；reset 是手动兜底：
+    用户改了目标/想从头迭代时直接清空历史。返回 False 表示 campaign 不存在。
+    """
+    from ..db.campaign_store import get_campaign_store
+
+    try:
+        ok = get_campaign_store().clear_loop_history_sync(int(campaign_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("reset_campaign_loop failed for %s: %s", campaign_id, exc)
+        return False
+    if ok:
+        logger.info("loop history reset for campaign %s", campaign_id)
+    return ok
 
 
 # ── DOE cycle pause/resume hooks ─────────────────────────────────────────

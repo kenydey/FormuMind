@@ -94,6 +94,14 @@ def apply_requirement_bounds(req: Requirement, factors: list[DOEFactor]) -> list
             high = min(high, float(voc_label))
 
         if high <= low:
+            # 退化边界：给 1e-3 宽度让 BayBE 能建连续参数。记 warning，
+            # 避免静默改写用户边界（DOE 链的 LeverSpec 只拦 low>high，low==high 放行）。
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "degenerate bound for factor %s: low=%s high=%s, widened to %s",
+                getattr(factor, "name", "?"), low, high, round(low + 1e-3, 4),
+            )
             high = low + 1e-3
         adjusted.append(factor.model_copy(update={"low": round(low, 4), "high": round(high, 4)}))
     return adjusted
