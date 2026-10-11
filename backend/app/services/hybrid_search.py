@@ -757,8 +757,10 @@ def _augment_with_structure_search(query: str, responses: list,
     try:
         from ..db.chunk_store import get_chunk_store
         store = get_chunk_store()
+        chunk_ids = [h["chunk_id"] for h in extra]
+        chunks = {c.id: c for c in store.chunks_by_ids(chunk_ids)}
         for hit in extra:
-            chunk = store.get(hit["chunk_id"])
+            chunk = chunks.get(hit["chunk_id"])
             if chunk:
                 responses.append(_to_response(chunk))
     except Exception:
