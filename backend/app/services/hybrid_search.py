@@ -720,6 +720,47 @@ def hybrid_search(
             project_id=project_id,
             include_global=include_global,
         )
-        return [_to_response(s.chunk) for s in scored]
+        responses = [_to_response(s.chunk) for s in scored]
+        # 结构相似搜索增强：查询含 SMILES 时并入结构索引结果（fail-open）
+        try:
+            responses = _augment_with_structure_search(query, responses, top_k)
+        except Exception:
+            pass
+        return responses
     except Exception as exc:
         return degrade_return(logger, exc, "hybrid search failed", [])
+
+
+def _augment_with_structure_search(query: str, responses: list,
+                                   top_k: int) -> list:
+    """查询含 SMILES 时，用 Tanimoto 相似搜索补充结果（去重后截断 top_k）。"""
+    from .chem_extract import extract_smiles
+    from .structure_index import search_similar_structures, rdkit_available
+    if not rdkit_available():
+        return responses
+    smiles_list = extract_smiles(query or "")
+    if not smiles_list:
+        return responses
+    seen_ids = {getattr(r, "id", None) for r in responses}
+    extra = []
+    for s in smiles_list[:2]:  # 最多取 2 个 SMILES
+        smi = s.get("canonical") or s.get("raw")
+        if not smi:
+            continue
+        for hit in search_similar_structures(smi, threshold=0.7, limit=5):
+            if hit["chunk_id"] not in seen_ids:
+                seen_ids.add(hit["chunk_id"])
+                extra.append(hit)
+    if not extra:
+        return responses
+    # 将结构命中转为 response（需查 chunk 文本）
+    try:
+        from ..db.chunk_store import get_chunk_store
+        store = get_chunk_store()
+        for hit in extra:
+            chunk = store.get(hit["chunk_id"])
+            if chunk:
+                responses.append(_to_response(chunk))
+    except Exception:
+        pass
+    return responses[:top_k]

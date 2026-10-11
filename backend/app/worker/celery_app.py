@@ -63,9 +63,18 @@ celery_app.conf.update(
 # FORMUMIND_TOPIC_RADAR_ENABLED + FORMUMIND_TOPIC_RADAR_TOPICS（JSON 数组）生成计划，
 # 见 worker/topic_radar.py。只有 beat 进程运行时才会触发（compose: --profile radar）；
 # 手动触发一次用 POST /api/search/topic-sweep。
+from datetime import timedelta
+
 from .topic_radar import build_beat_schedule
 
-celery_app.conf.beat_schedule = build_beat_schedule(settings)
+_beat_schedule = build_beat_schedule(settings)
+# P2-8: chunk 质量抽检每天 1 次（需 beat 进程运行）
+_beat_schedule["chunk-quality-daily"] = {
+    "task": "formumind.chunk_quality_sample",
+    "schedule": timedelta(hours=24),
+    "args": (20,),
+}
+celery_app.conf.beat_schedule = _beat_schedule
 
 # Register Celery tasks on import.
 import app.worker.tasks  # noqa: F401
