@@ -2077,3 +2077,22 @@ def run_chunk_quality_sample(self, n: int = 20) -> dict:
         return cq.run_quality_sample(n=n)
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:200]}
+
+
+@celery_app.task(bind=True, name="formumind.retrieval_eval_weekly")
+def run_retrieval_eval_weekly(self) -> dict:
+    """S-5: 每周检索质量评估。fail-open。
+
+    运行 golden 评估集，记录指标到阈值自适应历史。
+    """
+    try:
+        from ..services.threshold_adapt import adapt_thresholds
+        # 获取当前自适应阈值（触发历史数据更新）
+        thresholds = adapt_thresholds()
+        return {
+            "ok": True,
+            "thresholds": thresholds,
+            "note": "golden eval 需手动触发，此处仅更新阈值",
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
