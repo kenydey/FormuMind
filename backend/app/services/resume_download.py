@@ -45,7 +45,9 @@ def download_resumable(url: str, *, timeout: float = 30.0,
         downloaded = os.path.getsize(part_path)
 
     try:
-        from .pdf_downloader import ssrf_safe_client, _HEADERS, _is_safe_url
+        from .http_safe import ssrf_safe_client
+        from .pdf_downloader import _HEADERS
+        from .ingestion import _is_safe_url
         if not _is_safe_url(url):
             return None
     except Exception:

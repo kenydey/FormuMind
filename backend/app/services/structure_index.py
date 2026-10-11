@@ -72,26 +72,40 @@ def tanimoto_hex(hex1: str, hex2: str) -> float:
 def index_chunk_structures(chunk_id: str, source_id: str, text: str,
                            origin: str = "chem_extract") -> int:
     """从 chunk 文本提取 SMILES 并索引。返回索引条数。fail-open。"""
-    if not rdkit_available() or not (text or "").strip():
+    return index_chunks_structures([(chunk_id, source_id, text)], origin=origin)
+
+
+def index_chunks_structures(chunks: list[tuple[str, str, str]],
+                            origin: str = "chem_extract") -> int:
+    """批量索引（单事务）。chunks: [(chunk_id, source_id, text)]。"""
+    if not rdkit_available() or not chunks:
         return 0
     try:
         from .chem_extract import extract_smiles as extract_smiles_candidates
-        from ..db.database import get_session
+        from ..db.database import default_session_factory
         from ..db.models import StructureFingerprint
 
-        candidates = extract_smiles_candidates(text)
-        if not candidates:
-            return 0
-        n = 0
-        with get_session() as session:
-            for cand in candidates:
+        # 先全部提取（无 DB 操作）
+        to_add = []
+        seen = set()
+        for chunk_id, source_id, text in chunks:
+            if not (text or "").strip():
+                continue
+            for cand in extract_smiles_candidates(text):
                 canon = canonical_smiles(cand.get("canonical") or cand.get("raw") or "")
-                if not canon:
+                if not canon or (chunk_id, canon) in seen:
                     continue
                 fp_hex = smiles_to_fingerprint_hex(canon)
                 if not fp_hex:
                     continue
-                # 去重：同一 chunk 同一 SMILES 只存一次
+                seen.add((chunk_id, canon))
+                to_add.append((chunk_id, source_id, canon, fp_hex))
+        if not to_add:
+            return 0
+        # 单事务写入
+        n = 0
+        with default_session_factory()() as session:
+            for chunk_id, source_id, canon, fp_hex in to_add:
                 exists = session.query(StructureFingerprint).filter_by(
                     chunk_id=chunk_id, smiles=canon).first()
                 if exists:
@@ -108,7 +122,7 @@ def index_chunk_structures(chunk_id: str, source_id: str, text: str,
             session.commit()
         return n
     except Exception as exc:
-        logger.debug("index_chunk_structures failed: %s", exc)
+        logger.debug("index_chunks_structures failed: %s", exc)
         return 0
 
 
@@ -122,11 +136,11 @@ def search_similar_structures(query_smiles: str, *,
     if not q_hex:
         return []
     try:
-        from ..db.database import get_session
+        from ..db.database import default_session_factory
         from ..db.models import StructureFingerprint
 
         results = []
-        with get_session() as session:
+        with default_session_factory()() as session:
             rows = session.query(StructureFingerprint).all()
             for r in rows:
                 sim = tanimoto_hex(q_hex, r.fingerprint_hex)

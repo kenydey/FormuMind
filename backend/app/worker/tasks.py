@@ -2037,12 +2037,12 @@ def retry_fulltext_fetch(self, payload: dict) -> dict:
             "fulltext_retry failed for %s (attempt %d): %s — retry in %ds",
             identifier, self.request.retries + 1, exc, countdown,
         )
-        try:
-            raise self.retry(exc=exc, countdown=countdown)
-        except Exception:
-            # max_retries 耗尽
+        # Bug 修复：self.retry() 抛 Retry 异常表示"将重试"，不能被 except 吞掉。
+        # max_retries=3 耗尽时 self.retry 会抛原异常，此时才返回失败。
+        if self.request.retries >= 3:
             logger.error("fulltext_retry exhausted for %s: %s", identifier, exc)
             return {"ok": False, "identifier": identifier, "error": str(exc)[:200]}
+        raise self.retry(exc=exc, countdown=countdown)
 
 
 def enqueue_fulltext_retry(

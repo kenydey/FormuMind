@@ -29,9 +29,9 @@ _last_report: dict = {}
 def sample_chunks(n: int = 20) -> list[dict]:
     """随机采样 n 个 chunk。fail-open。"""
     try:
-        from ..db.database import get_session
+        from ..db.database import default_session_factory
         from ..db.models import DocumentChunk
-        with get_session() as session:
+        with default_session_factory()() as session:
             total = session.query(DocumentChunk).count()
             if total == 0:
                 return []
