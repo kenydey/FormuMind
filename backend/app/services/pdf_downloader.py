@@ -384,14 +384,16 @@ def fetch_pdf_ex(url: str, timeout: float = 20.0) -> tuple[bytes | None, str]:
             from .http_safe import ssrf_safe_client
             with ssrf_safe_client(timeout=10.0) as hclient:
                 hr = hclient.head(url, follow_redirects=True)
-                ctype = (hr.headers.get("content-type") or "").lower()
-                clen = hr.headers.get("content-length")
-                if clen and int(clen) > 100 * 1024 * 1024:
-                    return None, "too_large"
-                if ctype and "pdf" not in ctype and "octet-stream" not in ctype:
-                    # 非 PDF 内容类型，跳过（但允许空 content-type）
-                    if "html" in ctype or "text" in ctype:
-                        return None, "not_pdf"
+                # Bug#7 修复：仅 200 时才做预检，避免 HEAD 被拦但 GET 可用的误杀
+                if hr.status_code == 200:
+                    ctype = (hr.headers.get("content-type") or "").lower()
+                    clen = hr.headers.get("content-length")
+                    if clen and int(clen) > 100 * 1024 * 1024:
+                        return None, "too_large"
+                    if ctype and "pdf" not in ctype and "octet-stream" not in ctype:
+                        # 非 PDF 内容类型，跳过（但允许空 content-type）
+                        if "html" in ctype or "text" in ctype:
+                            return None, "not_pdf"
     except Exception:
         pass  # 预检失败不阻塞，继续正常下载
     try:
