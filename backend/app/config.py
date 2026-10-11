@@ -929,6 +929,15 @@ class Settings(BaseSettings):
     kb_recommend_top_k: int = 4
     # 探针 ↔ 推荐 ↔ 会话 BM25FAISSStore 共享：BM25 权重 α（默认 0.85）。
     kb_hybrid_alpha: float = 0.85
+    # S-1: 跨语言查询扩展。中文查询自动翻译为英文并行检索，结果融合。
+    # 成本约 ¥0.00031/中文查询，失败自动降级。默认关闭。
+    crosslingual_expand_enabled: bool = False
+    # S-6: 无结果时 LLM 改写查询重试。默认关闭。
+    query_rewrite_on_empty_enabled: bool = False
+    # S-4: 按查询特征动态调整 alpha。默认关闭。
+    dynamic_alpha_enabled: bool = False
+    # D-5: PDF 下载前 HEAD 预检（大小/类型）。默认关闭。
+    pdf_precheck_enabled: bool = False
     # 增量 #11: 推荐 A/B 实验开关。开启后按用户 ID 哈希分流，
     # 实验组用不同 MMR 多样性参数。默认关闭。
     recommend_ab_enabled: bool = False

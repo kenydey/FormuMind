@@ -41,6 +41,23 @@ def snapshot(project_id: str | None = None) -> dict:
             "total": sum(stats.values()),
         }
         _snapshots.append(snap)
+        # D-3: 持久化到 DB（fail-open）
+        try:
+            import json
+            import uuid
+            from ..db.database import default_session_factory
+            from ..db.models import AcquisitionSnapshot
+            with default_session_factory()() as session:
+                session.add(AcquisitionSnapshot(
+                    id=uuid.uuid4().hex,
+                    ts=snap["ts"],
+                    project_id=project_id,
+                    stats_json=json.dumps(dict(stats)),
+                    success_rate=snap["success_rate"],
+                ))
+                session.commit()
+        except Exception:
+            pass
         return snap
     except Exception as exc:
         logger.debug("acquisition snapshot failed: %s", exc)

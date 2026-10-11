@@ -1008,3 +1008,15 @@ class StructureFingerprint(Base):
         Index("ix_struct_fp_chunk", "chunk_id"),
         Index("ix_struct_fp_source", "source_id"),
     )
+
+
+class AcquisitionSnapshot(Base):
+    """D-3: 下载成功率趋势快照持久化。"""
+
+    __tablename__ = "acquisition_snapshots"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ts: Mapped[float] = mapped_column(Float, index=True)
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stats_json: Mapped[str] = mapped_column(Text, default="{}")
+    success_rate: Mapped[float] = mapped_column(Float, default=1.0)

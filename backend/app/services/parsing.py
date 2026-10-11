@@ -69,6 +69,9 @@ class ParseResult:
     # PageIndex 借鉴 A2: PDF 内嵌书签 [(title, level, page_1based)]，供
     # chunking 按页补充 heading_path。空 = 无书签或书签不可信（逐字节一致）。
     bookmarks: list = field(default_factory=list)
+    # P-5: 解析失败分类 —— oversized / encrypted / corrupted / timeout / oom / unsupported
+    # 运营面板可见，便于诊断。
+    failure_category: str = ""
 
     @property
     def ok(self) -> bool:
@@ -1206,6 +1209,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
         )
         r = ParseResult("", "none")
         r.table_stats = {"error": f"文件超限（{_max_mb:.0f}MB）"}
+        r.failure_category = "oversized"
         return r
     if ext == "pdf":
         _max_pages = int(get_settings().parse_max_pdf_pages or 2000)
@@ -1216,6 +1220,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                 logger.warning("parse_document: PDF %d 页超上限 %d，拒绝解析", n, _max_pages)
                 r = ParseResult("", "none")
                 r.table_stats = {"error": f"PDF 页数超限（{_max_pages}）"}
+                r.failure_category = "oversized"
                 return r
             # P2-3: 加密 PDF 直接返回 —— 避免走完全部 cascade（docling→marker→
             # mineru→rapidocr→markitdown→pypdf）每个都失败打日志，浪费时间。

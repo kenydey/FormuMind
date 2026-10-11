@@ -540,7 +540,50 @@ def _fetch_literature_text(
             logger.info("OA html fallback ok: %s", landing[:90])
             _set_acquisition("html")
             return FetchedFulltext(text=html_text)
+    # D-2: Semantic Scholar 回退（DOI → OA PDF）
+    ss_hit = _fetch_semanticscholar(ev, timeout)
+    if ss_hit:
+        return ss_hit
     raise FetchError(f"OA 全文获取失败: {last_reason}")
+
+
+def _fetch_semanticscholar(ev: Evidence, timeout: float) -> FetchedFulltext | None:
+    """D-2: Semantic Scholar API 回退。DOI → openAccessPdf。fail-open。"""
+    try:
+        import re
+        doi_m = re.search(r"10\.\d{4,}/[^\s]+", ev.identifier or "")
+        if not doi_m:
+            return None
+        doi = doi_m.group(0).rstrip(".,;")
+        from .http_safe import ssrf_safe_client
+        with ssrf_safe_client(timeout=timeout) as client:
+            r = client.get(
+                f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                params={"fields": "openAccessPdf,abstract"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            pdf_url = (data.get("openAccessPdf") or {}).get("url")
+            if pdf_url:
+                from .pdf_downloader import fetch_pdf_ex, _parse_pdf_bytes
+                pdf, _ = fetch_pdf_ex(pdf_url, timeout=timeout)
+                if pdf:
+                    parsed = _parse_pdf_bytes(pdf)
+                    if parsed and parsed.markdown:
+                        _set_acquisition("pdf")
+                        return FetchedFulltext(
+                            text=parsed.markdown, pdf_bytes=pdf,
+                            tables=list(getattr(parsed, "tables", None) or []) or None,
+                        )
+            # 无 PDF 时用 abstract 兜底
+            abstract = data.get("abstract")
+            if abstract and len(abstract.strip()) > 200:
+                _set_acquisition("text")
+                return FetchedFulltext(text=abstract)
+    except Exception:
+        pass
+    return None
 
 
 def _extract_web_text(html: str) -> str:

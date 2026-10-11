@@ -141,7 +141,19 @@ def search_similar_structures(query_smiles: str, *,
 
         results = []
         with default_session_factory()() as session:
-            rows = session.query(StructureFingerprint).all()
+            # S-3: 前缀预过滤 —— 高阈值时指纹前 16 字符大概率相同，
+            # 用 LIKE 走索引，大幅减少 Python 计算量。
+            # 阈值 <0.5 时前缀过滤可能漏检，回退全表。
+            if threshold >= 0.5:
+                prefix = q_hex[:16]
+                rows = session.query(StructureFingerprint).filter(
+                    StructureFingerprint.fingerprint_hex.like(prefix + "%")
+                ).all()
+                # 前缀无命中时回退全表（避免漏检）
+                if not rows:
+                    rows = session.query(StructureFingerprint).all()
+            else:
+                rows = session.query(StructureFingerprint).all()
             for r in rows:
                 sim = tanimoto_hex(q_hex, r.fingerprint_hex)
                 if sim >= threshold:

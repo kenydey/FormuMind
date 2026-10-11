@@ -386,6 +386,22 @@ def hybrid_search_scored(
     settings = get_settings()
     if alpha is None:
         alpha = float(settings.kb_hybrid_alpha)
+        # S-4: 按查询特征动态调优 alpha
+        # 短查询（≤3 词）偏 BM25（精确匹配）；长查询偏向量（语义）
+        # 中文查询偏向量（分词噪声大）
+        if settings.dynamic_alpha_enabled:
+            try:
+                q = (query or "").strip()
+                words = len(q.split())
+                has_cjk = any('\u4e00' <= ch <= '\u9fff' for ch in q)
+                if has_cjk:
+                    alpha = min(1.0, alpha + 0.1)
+                elif words <= 3:
+                    alpha = max(0.0, alpha - 0.15)
+                elif words >= 10:
+                    alpha = min(1.0, alpha + 0.1)
+            except Exception:
+                pass
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
@@ -721,14 +737,88 @@ def hybrid_search(
             include_global=include_global,
         )
         responses = [_to_response(s.chunk) for s in scored]
+        # S-1: 跨语言扩展 —— 中文查询翻译为英文并行检索，结果融合
+        try:
+            responses = _augment_with_crosslingual(query, responses, top_k,
+                                                   alpha, project_id, include_global)
+        except Exception:
+            pass
         # 结构相似搜索增强：查询含 SMILES 时并入结构索引结果（fail-open）
         try:
             responses = _augment_with_structure_search(query, responses, top_k)
         except Exception:
             pass
+        # S-6: 无结果时 LLM 改写查询重试一次
+        if not responses and get_settings().query_rewrite_on_empty_enabled:
+            try:
+                responses = _retry_with_rewritten_query(
+                    query, top_k, alpha, project_id, include_global)
+            except Exception:
+                pass
         return responses
     except Exception as exc:
         return degrade_return(logger, exc, "hybrid search failed", [])
+
+
+def _retry_with_rewritten_query(query: str, top_k: int, alpha: float,
+                                project_id: str | None,
+                                include_global: bool) -> list:
+    """S-6: LLM 改写查询（同义词/上位词）重试。fail-open。"""
+    try:
+        from . import llm as _llm
+        prompt = (
+            "将以下检索查询改写为更通用的表达（同义词替换、术语泛化），"
+            "只输出改写后的查询，不要解释：\n" + (query or "")
+        )
+        rewritten = _llm._call_with_deadline(
+            lambda: _llm._call_llm(prompt), 15.0,
+        )
+        if not rewritten:
+            return []
+        rewritten = str(rewritten).strip().strip('"').strip()
+        if not rewritten or rewritten == query.strip():
+            return []
+        scored = hybrid_search_scored(
+            rewritten, top_k=top_k, alpha=alpha,
+            project_id=project_id, include_global=include_global,
+        )
+        return [_to_response(s.chunk) for s in scored]
+    except Exception:
+        return []
+
+
+def _augment_with_crosslingual(query: str, responses: list, top_k: int,
+                               alpha: float, project_id: str | None,
+                               include_global: bool) -> list:
+    """S-1: 中文查询翻译为英文，并行检索后融合（去重）。fail-open。"""
+    settings = get_settings()
+    if not settings.crosslingual_expand_enabled:
+        return responses
+    # 仅中文查询触发
+    if not any('\u4e00' <= ch <= '\u9fff' for ch in (query or "")):
+        return responses
+    try:
+        from .query_translate import translate_query_zh_to_en
+        en_query = translate_query_zh_to_en(query)
+        if not en_query or en_query.strip() == query.strip():
+            return responses
+        # 英文查询并行检索
+        en_scored = hybrid_search_scored(
+            en_query, top_k=top_k, alpha=alpha,
+            project_id=project_id, include_global=include_global,
+        )
+        seen_ids = {getattr(r, "id", None) for r in responses}
+        for s in en_scored:
+            resp = _to_response(s.chunk)
+            cid = getattr(resp, "id", None)
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                responses.append(resp)
+                if len(responses) >= top_k:
+                    break
+    except Exception:
+        pass
+    return responses[:top_k]
 
 
 def _augment_with_structure_search(query: str, responses: list,
