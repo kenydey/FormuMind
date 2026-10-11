@@ -620,28 +620,41 @@ class TestOcsrGate:
     """OCSR off (the default): fail fast instead of waiting on a queue nobody consumes."""
 
     def test_disabled_ocsr_answers_immediately_without_dispatch(self, material_store, monkeypatch):
-        calls: list = []
-        monkeypatch.setattr(
-            "app.worker.celery_app.celery_app.send_task",
-            lambda *a, **k: calls.append(1) or _FakeAsyncResult({"ok": True, "smiles": "CCO"}),
-        )
-        res = recognize_structure_image(_FAKE_PNG)
-        assert calls == [], "must not dispatch to the molscribe queue"
-        assert res["recognized"] is False
-        assert "OCSR" in (res["error"] or "")
-        assert any("OCSR" in w for w in res["warnings"])
+        from app.config import get_settings
+        # 2026-10-11：ocsr_enabled 默认 True，本测试显式关闭
+        monkeypatch.setenv("FORMUMIND_OCSR_ENABLED", "false")
+        get_settings.cache_clear()
+        try:
+            calls: list = []
+            monkeypatch.setattr(
+                "app.worker.celery_app.celery_app.send_task",
+                lambda *a, **k: calls.append(1) or _FakeAsyncResult({"ok": True, "smiles": "CCO"}),
+            )
+            res = recognize_structure_image(_FAKE_PNG)
+            assert calls == [], "must not dispatch to the molscribe queue"
+            assert res["recognized"] is False
+            assert "OCSR" in (res["error"] or "")
+            assert any("OCSR" in w for w in res["warnings"])
+        finally:
+            get_settings.cache_clear()
 
     def test_endpoint_with_ocsr_off_degrades_quickly(self, material_store, monkeypatch):
-        monkeypatch.setattr(
-            "app.worker.celery_app.celery_app.send_task",
-            lambda *a, **k: (_ for _ in ()).throw(AssertionError("dispatched with OCSR off")),
-        )
-        r = client.post(
-            "/api/chemical/structure",
-            files={"image": ("s.png", _FAKE_PNG, "image/png")},
-        )
-        assert r.status_code == 200
-        assert r.json()["recognized"] is False and "OCSR" in r.json()["error"]
+        from app.config import get_settings
+        monkeypatch.setenv("FORMUMIND_OCSR_ENABLED", "false")
+        get_settings.cache_clear()
+        try:
+            monkeypatch.setattr(
+                "app.worker.celery_app.celery_app.send_task",
+                lambda *a, **k: (_ for _ in ()).throw(AssertionError("dispatched with OCSR off")),
+            )
+            r = client.post(
+                "/api/chemical/structure",
+                files={"image": ("s.png", _FAKE_PNG, "image/png")},
+            )
+            assert r.status_code == 200
+            assert r.json()["recognized"] is False and "OCSR" in r.json()["error"]
+        finally:
+            get_settings.cache_clear()
 
 
 class TestStructureEndpointOffload:

@@ -41,7 +41,9 @@ def test_prewarm_molscribe_noop_without_molscribe():
 def test_availability_structure(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(ocsr, "_molscribe_worker_alive", lambda: False)
     a = ocsr.availability()
-    assert set(a) == {"enabled", "molscribe_installed", "molscribe_queue", "molscribe_timeout_s"}
+    assert set(a) == {"enabled", "molscribe_installed", "molscribe_queue",
+                      "molscribe_timeout_s", "vision_backend_config",
+                      "vision_backend_resolved", "hardware"}
     assert a["molscribe_installed"] is False
 
 
@@ -58,9 +60,10 @@ def test_availability_reports_worker_alive(monkeypatch: pytest.MonkeyPatch):
 
 def test_settings_have_ocsr_fields():
     s = Settings()
-    assert s.ocsr_enabled is False
+    assert s.ocsr_enabled is True  # 2026-10-11：默认开启
     assert s.molscribe_queue == "molscribe"
     assert s.molscribe_timeout_s == 180.0
+    assert s.chem_vision_backend == "auto"
 
 
 # ── vision_extract._ocsr_direct 投递路由 ─────────────────────────────────────

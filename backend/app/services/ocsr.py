@@ -167,8 +167,20 @@ def prewarm_molscribe() -> bool:
 
 # ── 统一预测入口 ───────────────────────────────────────────────────────────
 def predict_smiles_local(image_path: str) -> str | None:
-    """离线识别入口（当前唯一后端 MolScribe）。缺库时中性返回 None。"""
-    return predict_smiles_molscribe(image_path)
+    """离线识别统一入口（硬件自适应）。缺库/禁用时中性返回 None（调用方回退 vision-llm）。"""
+    backend = resolve_vision_backend()
+    if backend == "off":
+        return None
+    if backend == "molscribe":
+        return predict_smiles_molscribe(image_path)
+    if backend == "molparser-mobile":
+        try:
+            from .molparser_mobile import predict_smiles_molparser_mobile
+            return predict_smiles_molparser_mobile(image_path)
+        except Exception:
+            return None
+    # vision-llm 由调用方直接处理，这里返回 None 触发回退
+    return None
 
 
 _alive_cache: dict = {"t": 0.0, "v": False}
@@ -207,9 +219,99 @@ def _molscribe_worker_alive() -> bool:
 
 def availability() -> dict:
     s = get_settings()
+    hw = detect_hardware_tier()
     return {
         "enabled": s.ocsr_enabled,
         "molscribe_installed": _molscribe_worker_alive(),
         "molscribe_queue": s.molscribe_queue,
         "molscribe_timeout_s": s.molscribe_timeout_s,
+        "vision_backend_config": s.chem_vision_backend,
+        "vision_backend_resolved": resolve_vision_backend(),
+        "hardware": hw,
     }
+
+
+# ── 硬件自适应后端选择（2026-10-11）────────────────────────────────────
+# 对标 pdf_parser="auto" 模式：启动时检测硬件，自动选 tier；可手动 pin。
+_CHEM_VISION_TIERS = ("molscribe", "molparser-mobile", "vision-llm", "off")
+
+_hw_cache: dict = {}
+
+
+def detect_hardware_tier() -> dict:
+    """检测主机硬件，返回 {"gpu": bool, "mem_gb": float, "tier": str}。
+
+    tier 语义：
+      - "gpu": CUDA 可用 → MolScribe GPU（快）
+      - "high-cpu": 内存 >4GB → MolScribe CPU（后台队列，3-8s/张）
+      - "low-cpu": 内存 ≤4GB → MolParser-Mobile（轻量，POC 后启用）
+      - "minimal": 无 torch/内存极低 → vision-llm 兜底
+    永不抛异常，fail-open。
+    """
+    if _hw_cache:
+        return _hw_cache
+    gpu = False
+    try:
+        import torch
+        gpu = torch.cuda.is_available()
+    except Exception:
+        pass
+    mem_gb = 0.0
+    try:
+        import psutil
+        mem_gb = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        mem_gb = int(line.split()[1]) / (1024 ** 2)
+                        break
+        except Exception:
+            pass
+    if gpu:
+        tier = "gpu"
+    elif mem_gb > 4:
+        tier = "high-cpu"
+    elif mem_gb > 0:
+        tier = "low-cpu"
+    else:
+        tier = "minimal"
+    _hw_cache.update(gpu=gpu, mem_gb=round(mem_gb, 1), tier=tier)
+    logger.info("chem vision hardware: gpu=%s mem=%.1fGB tier=%s", gpu, mem_gb, tier)
+    return _hw_cache
+
+
+def resolve_vision_backend() -> str:
+    """解析 chem_vision_backend 配置为实际后端名。
+
+    - "auto" → 按硬件 tier 映射：gpu/high-cpu→molscribe，
+      low-cpu→molparser-mobile（未就绪时回退 vision-llm），minimal→vision-llm
+    - 手动 pin → 返回该值（未知值警告后回退 auto）
+    - "off" → 禁用
+    """
+    s = get_settings()
+    prefer = (s.chem_vision_backend or "auto").strip().lower()
+    if prefer == "off":
+        return "off"
+    if prefer in _CHEM_VISION_TIERS and prefer != "off":
+        return prefer
+    if prefer != "auto":
+        logger.warning("unknown chem_vision_backend=%r — using auto", s.chem_vision_backend)
+    hw = detect_hardware_tier()
+    tier = hw["tier"]
+    if tier in ("gpu", "high-cpu"):
+        return "molscribe"
+    if tier == "low-cpu":
+        # MolParser-Mobile 尚未部署就绪前回退 vision-llm
+        return "molparser-mobile" if _molparser_mobile_available() else "vision-llm"
+    return "vision-llm"
+
+
+def _molparser_mobile_available() -> bool:
+    """MolParser-Mobile 是否可用（POC 阶段恒 False，模型未部署）。"""
+    try:
+        from .molparser_mobile import molparser_mobile_available
+        return molparser_mobile_available()
+    except Exception:
+        return False

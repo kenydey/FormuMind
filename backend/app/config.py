@@ -985,13 +985,18 @@ class Settings(BaseSettings):
     # ═══ OCSR 离线结构识别（MolScribe）════
     # 化学结构图离线识别为 SMILES，作为主路径（免 token，省费用），视觉 LLM 兜底。
     # 运行在独立 molscribe Celery worker（独立 venv，torch-cpu），不占主服务内存。
-    ocsr_enabled: bool = False
+    # 2026-10-11：默认开启（后台队列串行，不阻塞主流程）。
+    ocsr_enabled: bool = True
     # Celery 队列名（独立 worker 消费）
     molscribe_queue: str = "molscribe"
     # MolScribe 单张识别超时。CPU 推理预热后 ~3-8s/张；但 worker 冷启动时首个任务要等
     # 模型加载（~35s）。预热钩子把加载挪到 worker 启动时，仍要覆盖「主 worker 先发任务、
     # molscribe worker 尚未就绪」的窗口，故给 180s 余量。超时后回退视觉 LLM，非硬失败。
     molscribe_timeout_s: float = 180.0
+    # ═══ 化学视觉硬件自适应 ═══
+    # auto：启动时检测硬件自动选 tier；可手动 pin（molscribe/molparser-mobile/vision-llm/off）。
+    # 语义与 pdf_parser="auto" 一致：pin 某 tier 后，更轻的 tier 作为 fallback。
+    chem_vision_backend: str = "auto"
 
     # Source Guide LLM extraction (ingest pipeline)
     source_guide_enabled: bool = True
