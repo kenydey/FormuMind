@@ -353,6 +353,23 @@ async def integer_out_of_range_handler(_request: Request, exc: OverflowError) ->
     raise exc
 
 
+def _json_safe_errors(errors: list) -> list:
+    """Pydantic puts the exception a validator raised into ``ctx["error"]``; ``JSONResponse`` cannot serialise it, so a
+    422 became a 500 (``TypeError: Object of type ValueError is not JSON serializable``) for every field whose
+    validator raises ``ValueError`` - an invalid objective ``direction`` was the fuzzer's find: eight endpoints answered 500.
+    The exception is sent as its message, the way FastAPI's own handler would have encoded it."""
+    from fastapi.encoders import jsonable_encoder
+
+    safe = []
+    for error in errors:
+        error = dict(error)
+        ctx = error.get("ctx")
+        if isinstance(ctx, dict):
+            error["ctx"] = {k: (str(v) if isinstance(v, BaseException) else v) for k, v in ctx.items()}
+        safe.append(error)
+    return jsonable_encoder(safe)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Log 422 validation errors so intermittent autosave failures are traceable.
@@ -373,7 +390,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
             for e in errs
         ]
         logger.warning("PUT %s validation failed (%d errors): %s", request.url.path, len(errs), detail)
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return JSONResponse(status_code=422, content={"detail": _json_safe_errors(exc.errors())})
 
 
 @app.get("/health", tags=["meta"])
