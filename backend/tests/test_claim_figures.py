@@ -39,3 +39,16 @@ def test_a_claim_without_figures_is_judged_by_its_words_as_before():
 def test_figures_fold_width_thousands_separators_and_trailing_zeros():
     assert _figures("１，０００ h, 0.50 mm, 2.5%") == {"1000", "0.5", "2.5"}
     assert _figures("无数字") == set()
+
+
+def test_a_decimal_point_does_not_end_a_sentence():
+    """The chat claim splitter cut after every full stop: "pH 6.5" became the claims "pH 6." and "5", a DOI "10." and "1000/x"."""
+    from app.services.chat_claims import _SENTENCE_SPLIT
+
+    def parts(text: str) -> list[str]:
+        return [p for p in _SENTENCE_SPLIT.split(text) if p.strip()]
+
+    assert parts("槽液 pH 6.5，温度 35.5 ℃。膜厚 80.0 μm") == ["槽液 pH 6.5，温度 35.5 ℃。", "膜厚 80.0 μm"]
+    assert parts("see 10.1000/test for 0.5 mm. Next sentence.") == ["see 10.1000/test for 0.5 mm.", "Next sentence."]
+    assert parts("ok with 10.1000/test") == ["ok with 10.1000/test"]
+    assert parts("第一句！第二句？第三句。") == ["第一句！", "第二句？", "第三句。"]

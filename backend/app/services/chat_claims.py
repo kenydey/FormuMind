@@ -17,7 +17,10 @@ from ..pipeline.claim_checker import (
 
 logger = logging.getLogger(__name__)
 
-_SENTENCE_SPLIT = re.compile(r"(?<=[。！？.!?])\s*")
+# A full stop ends a sentence only when blank space (or the end) follows it. Splitting after every "." cut "pH 6.5" into
+# "pH 6." and "5", a DOI "10.1000/x" into "10." and "1000/x", and "e.g." / "Fig.2" in two - so the claims that were verified
+# against the evidence were fragments, and every decimal in an answer was checked as if it were a separate statement.
+_SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?])\s*|(?<=\.)\s+|(?<=\.)$")
 
 # 2026-09-04 (P3): 每次问答新建 executor + shutdown(wait=False) 会让超时的
 # deepseek 阻塞线程成为孤儿(60s idle×2 重试 ≈ 2 分钟才自然消亡), 慢窗口

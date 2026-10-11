@@ -95,6 +95,22 @@ _BACKGROUND_DRAIN_TIMEOUT_S = 60.0
 
 
 @pytest.fixture(autouse=True)
+def _home_files_are_not_the_real_ones(tmp_path_factory, monkeypatch):
+    """Two services keep feedback logs under ``~/.formumind`` (A/B tracking of recommendations, retrieval-threshold feedback).
+    Tests that ran the recommend pipeline appended to the developer's real files, and ``test_ab_tracking`` ("no data -> not
+    sufficient") then failed on any machine that had ever run the suite. Each test gets its own empty files."""
+    folder = tmp_path_factory.mktemp("formumind-home")
+    try:
+        from app.services import recommend_ab_track, threshold_adapt
+
+        monkeypatch.setattr(recommend_ab_track, "_TRACK_FILE", folder / "recommend_ab_tracking.jsonl")
+        monkeypatch.setattr(threshold_adapt, "_HISTORY_FILE", folder / "threshold_history.jsonl")
+    except Exception:  # noqa: BLE001 - a module that cannot be imported has no file to protect
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _drain_background_threads():
     # Deliberately does NOT depend on ``monkeypatch``: set up first, this fixture tears
     # down *last* — after the test's environment overrides are undone. Draining while
