@@ -2066,3 +2066,14 @@ def enqueue_fulltext_retry(
     except Exception as exc:
         logger.warning("enqueue_fulltext_retry failed (fail-open): %s", exc)
         return None
+
+
+# ── P2-8: chunk 质量抽检（每天 1 次，由 beat 调度或手动触发）──────────────
+@celery_app.task(bind=True, name="formumind.chunk_quality_sample")
+def run_chunk_quality_sample(self, n: int = 20) -> dict:
+    """定期 chunk 质量抽检。fail-open，不阻塞。"""
+    from ..services import chunk_quality as cq
+    try:
+        return cq.run_quality_sample(n=n)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}

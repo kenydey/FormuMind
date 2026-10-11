@@ -107,6 +107,34 @@ def acquisition_stats(
     return {"project_id": project_id, "total": total, "by_acquisition": stats}
 
 
+@router.get("/acquisition-trend")
+def acquisition_trend(
+    project_id: str | None = Query(default=None, description="按项目过滤，不传则全局"),
+    window: int = Query(default=10, description="近期快照窗口"),
+) -> dict:
+    """P2-7: 下载成功率趋势告警 —— 近期 vs 基期成功率变化，跌幅超 15% 告警。"""
+    from ..services import acquisition_trend as at
+    snap = at.snapshot(project_id=project_id)
+    t = at.trend(window=window)
+    return {"snapshot": snap, "trend": t}
+
+
+@router.post("/chunk-quality-sample")
+def chunk_quality_sample(
+    n: int = Query(default=20, description="采样 chunk 数"),
+) -> dict:
+    """P2-8: chunk 质量抽检 —— 随机采样 LLM 四维度打分（fail-open）。"""
+    from ..services import chunk_quality as cq
+    return cq.run_quality_sample(n=n)
+
+
+@router.get("/chunk-quality-report")
+def chunk_quality_report() -> dict:
+    """P2-8: 上次 chunk 质量抽检报告。"""
+    from ..services import chunk_quality as cq
+    return cq.last_report()
+
+
 @router.get("/quality-ops")
 def quality_ops(
     project_id: str | None = Query(default=None, description="Optional project scope label"),
