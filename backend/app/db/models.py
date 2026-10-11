@@ -982,3 +982,29 @@ class RecommendOutcomeRow(Base):
         Index("ix_recommend_outcomes_recommend_id", "recommend_id"),
         Index("ix_recommend_outcomes_project", "project_id"),
     )
+
+
+class StructureFingerprint(Base):
+    """P1-3: 化学结构指纹索引 —— SMILES → Morgan 指纹，支持 Tanimoto 相似搜索。
+
+    不是第二套检索引擎：这是 document_chunks 的扩展列（按 chunk_id 关联），
+    与现有文本/向量检索并列，供"找含苯环/结构相似"类查询使用。
+    指纹存为 hex 字符串（2048 bit = 512 hex 字符），Python 端算 Tanimoto。
+    """
+
+    __tablename__ = "structure_fingerprints"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(String(36), index=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    # 规范 SMILES
+    smiles: Mapped[str] = mapped_column(String(2000), default="")
+    # Morgan 指纹 hex（2048 bit）
+    fingerprint_hex: Mapped[str] = mapped_column(Text, default="")
+    # 来源：ocsr / chem_extract / reaction_parser / bigsmiles
+    origin: Mapped[str] = mapped_column(String(32), default="")
+
+    __table_args__ = (
+        Index("ix_struct_fp_chunk", "chunk_id"),
+        Index("ix_struct_fp_source", "source_id"),
+    )

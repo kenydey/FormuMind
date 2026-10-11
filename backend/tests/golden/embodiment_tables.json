@@ -903,6 +903,1380 @@
           ]
         ]
       }
+    },
+    {
+      "id": "EMB-021",
+      "label": "Example 3",
+      "patent": "EP2719583-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Acrylic resin",
+            "73.3"
+          ],
+          [
+            "n-Butanol",
+            "9.1"
+          ],
+          [
+            "Amine hardener",
+            "17.6"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Acrylic resin",
+          "n-Butanol",
+          "Amine hardener"
+        ],
+        "wt_pct": [
+          73.3,
+          9.1,
+          17.6
+        ]
+      }
+    },
+    {
+      "id": "EMB-022",
+      "label": "Example 1",
+      "patent": "EP2571945-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Amine hardener",
+            "372.0"
+          ],
+          [
+            "Anti-skinning agent",
+            "9.0"
+          ],
+          [
+            "Polyamide 650",
+            "619.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Amine hardener",
+          "Anti-skinning agent",
+          "Polyamide 650"
+        ],
+        "wt_pct": [
+          37.2,
+          0.9,
+          61.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-023",
+      "label": "Example 7",
+      "patent": "CN4698379-like",
+      "table": {
+        "headers": [
+          "Chemical",
+          "Content (%)"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "88.9"
+          ],
+          [
+            "Xylene",
+            "9.3"
+          ],
+          [
+            "Flash rust inhibitor",
+            "1.9"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "Xylene",
+          "Flash rust inhibitor"
+        ],
+        "wt_pct": [
+          88.9,
+          9.3,
+          1.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-024",
+      "label": "Example 3",
+      "patent": "US4612365-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "Parts by weight"
+        ],
+        "rows": [
+          [
+            "Epoxy resin E-51",
+            "470.0"
+          ],
+          [
+            "Leveling agent",
+            "3.0"
+          ],
+          [
+            "Anti-skinning agent",
+            "3.0"
+          ],
+          [
+            "DBTL catalyst",
+            "2.0"
+          ],
+          [
+            "Acrylic resin",
+            "522.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Epoxy resin E-51",
+          "Leveling agent",
+          "Anti-skinning agent",
+          "DBTL catalyst",
+          "Acrylic resin"
+        ],
+        "wt_pct": [
+          47.0,
+          0.3,
+          0.3,
+          0.2,
+          52.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-025",
+      "label": "Example 6",
+      "patent": "US5437923-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Drier Co",
+            "0.8"
+          ],
+          [
+            "Zinc phosphate",
+            "12.6"
+          ],
+          [
+            "Alkyd resin",
+            "86.6"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Drier Co",
+          "Zinc phosphate",
+          "Alkyd resin"
+        ],
+        "wt_pct": [
+          0.8,
+          12.6,
+          86.6
+        ]
+      }
+    },
+    {
+      "id": "EMB-026",
+      "label": "Example 10",
+      "patent": "CN7067228-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "496.0"
+          ],
+          [
+            "Zinc phosphate",
+            "83.0"
+          ],
+          [
+            "Drier Co",
+            "5.0"
+          ],
+          [
+            "Titanium dioxide",
+            "155.0"
+          ],
+          [
+            "HDI trimer",
+            "258.0"
+          ],
+          [
+            "Anti-skinning agent",
+            "3.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "Zinc phosphate",
+          "Drier Co",
+          "Titanium dioxide",
+          "HDI trimer",
+          "Anti-skinning agent"
+        ],
+        "wt_pct": [
+          49.6,
+          8.3,
+          0.5,
+          15.5,
+          25.8,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "EMB-027",
+      "label": "Example 2",
+      "patent": "EP4905582-like",
+      "table": {
+        "headers": [
+          "Chemical",
+          "Content (%)"
+        ],
+        "rows": [
+          [
+            "Polyamide 650",
+            "39.1"
+          ],
+          [
+            "n-Butanol",
+            "12.1"
+          ],
+          [
+            "HDI trimer",
+            "48.8"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Polyamide 650",
+          "n-Butanol",
+          "HDI trimer"
+        ],
+        "wt_pct": [
+          39.1,
+          12.1,
+          48.8
+        ]
+      }
+    },
+    {
+      "id": "EMB-028",
+      "label": "Example 4",
+      "patent": "CN5479144-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "Polyester resin",
+            "31.4"
+          ],
+          [
+            "Alkyd resin",
+            "43.2"
+          ],
+          [
+            "Leveling agent",
+            "0.2"
+          ],
+          [
+            "Amine hardener",
+            "9.4"
+          ],
+          [
+            "Barium sulfate",
+            "15.7"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Polyester resin",
+          "Alkyd resin",
+          "Leveling agent",
+          "Amine hardener",
+          "Barium sulfate"
+        ],
+        "wt_pct": [
+          31.4,
+          43.2,
+          0.2,
+          9.4,
+          15.7
+        ]
+      }
+    },
+    {
+      "id": "EMB-029",
+      "label": "Example 4",
+      "patent": "EP3741438-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Flash rust inhibitor",
+            "20.0"
+          ],
+          [
+            "Leveling agent",
+            "6.0"
+          ],
+          [
+            "Waterborne epoxy",
+            "974.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Flash rust inhibitor",
+          "Leveling agent",
+          "Waterborne epoxy"
+        ],
+        "wt_pct": [
+          2.0,
+          0.6,
+          97.4
+        ]
+      }
+    },
+    {
+      "id": "EMB-030",
+      "label": "Example 1",
+      "patent": "US6292423-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "55.6"
+          ],
+          [
+            "n-Butanol",
+            "7.2"
+          ],
+          [
+            "DBTL catalyst",
+            "0.2"
+          ],
+          [
+            "Polyamide 650",
+            "23.1"
+          ],
+          [
+            "Amine hardener",
+            "13.9"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "n-Butanol",
+          "DBTL catalyst",
+          "Polyamide 650",
+          "Amine hardener"
+        ],
+        "wt_pct": [
+          55.6,
+          7.2,
+          0.2,
+          23.1,
+          13.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-031",
+      "label": "Example 4",
+      "patent": "US9375710-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "Amount"
+        ],
+        "rows": [
+          [
+            "Xylene",
+            "29.1"
+          ],
+          [
+            "Amine hardener",
+            "69.8"
+          ],
+          [
+            "DBTL catalyst",
+            "1.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Xylene",
+          "Amine hardener",
+          "DBTL catalyst"
+        ],
+        "wt_pct": [
+          29.1,
+          69.8,
+          1.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-032",
+      "label": "Example 10",
+      "patent": "US8187926-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Defoamer BYK-066N",
+            "4.0"
+          ],
+          [
+            "Acrylic resin",
+            "401.0"
+          ],
+          [
+            "Flash rust inhibitor",
+            "8.0"
+          ],
+          [
+            "n-Butanol",
+            "50.0"
+          ],
+          [
+            "Amine hardener",
+            "96.0"
+          ],
+          [
+            "Alkyd resin",
+            "441.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Defoamer BYK-066N",
+          "Acrylic resin",
+          "Flash rust inhibitor",
+          "n-Butanol",
+          "Amine hardener",
+          "Alkyd resin"
+        ],
+        "wt_pct": [
+          0.4,
+          40.1,
+          0.8,
+          5.0,
+          9.6,
+          44.1
+        ]
+      }
+    },
+    {
+      "id": "EMB-033",
+      "label": "Example 1",
+      "patent": "EP2839607-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "n-Butanol",
+            "13.9"
+          ],
+          [
+            "Defoamer BYK-066N",
+            "1.1"
+          ],
+          [
+            "Barium sulfate",
+            "44.7"
+          ],
+          [
+            "TGIC",
+            "6.7"
+          ],
+          [
+            "Titanium dioxide",
+            "33.6"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "n-Butanol",
+          "Defoamer BYK-066N",
+          "Barium sulfate",
+          "TGIC",
+          "Titanium dioxide"
+        ],
+        "wt_pct": [
+          13.9,
+          1.1,
+          44.7,
+          6.7,
+          33.6
+        ]
+      }
+    },
+    {
+      "id": "EMB-034",
+      "label": "Example 10",
+      "patent": "CN8852574-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Anti-skinning agent",
+            "5.0"
+          ],
+          [
+            "Titanium dioxide",
+            "235.0"
+          ],
+          [
+            "Drier Co",
+            "8.0"
+          ],
+          [
+            "Waterborne epoxy",
+            "752.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Anti-skinning agent",
+          "Titanium dioxide",
+          "Drier Co",
+          "Waterborne epoxy"
+        ],
+        "wt_pct": [
+          0.5,
+          23.5,
+          0.8,
+          75.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-035",
+      "label": "Example 6",
+      "patent": "EP2871534-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "Amount"
+        ],
+        "rows": [
+          [
+            "Zinc phosphate",
+            "7.5"
+          ],
+          [
+            "Waterborne epoxy",
+            "45.3"
+          ],
+          [
+            "Acrylic resin",
+            "47.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Zinc phosphate",
+          "Waterborne epoxy",
+          "Acrylic resin"
+        ],
+        "wt_pct": [
+          7.5,
+          45.3,
+          47.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-036",
+      "label": "Example 3",
+      "patent": "US9517485-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "Polyester resin",
+            "25.8"
+          ],
+          [
+            "Epoxy resin E-51",
+            "29.0"
+          ],
+          [
+            "Acrylic resin",
+            "32.3"
+          ],
+          [
+            "Barium sulfate",
+            "12.9"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Polyester resin",
+          "Epoxy resin E-51",
+          "Acrylic resin",
+          "Barium sulfate"
+        ],
+        "wt_pct": [
+          25.8,
+          29.0,
+          32.3,
+          12.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-037",
+      "label": "Example 9",
+      "patent": "CN9897858-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Barium sulfate",
+            "248.0"
+          ],
+          [
+            "Xylene",
+            "62.0"
+          ],
+          [
+            "Defoamer BYK-066N",
+            "6.0"
+          ],
+          [
+            "Alkyd resin",
+            "681.0"
+          ],
+          [
+            "Leveling agent",
+            "4.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Barium sulfate",
+          "Xylene",
+          "Defoamer BYK-066N",
+          "Alkyd resin",
+          "Leveling agent"
+        ],
+        "wt_pct": [
+          24.8,
+          6.2,
+          0.6,
+          68.1,
+          0.4
+        ]
+      }
+    },
+    {
+      "id": "EMB-038",
+      "label": "Example 4",
+      "patent": "CN1971823-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "Parts by weight"
+        ],
+        "rows": [
+          [
+            "TGIC",
+            "22.0"
+          ],
+          [
+            "Epoxy resin E-51",
+            "331.0"
+          ],
+          [
+            "Zinc phosphate",
+            "59.0"
+          ],
+          [
+            "Alkyd resin",
+            "404.0"
+          ],
+          [
+            "HDI trimer",
+            "184.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "TGIC",
+          "Epoxy resin E-51",
+          "Zinc phosphate",
+          "Alkyd resin",
+          "HDI trimer"
+        ],
+        "wt_pct": [
+          2.2,
+          33.1,
+          5.9,
+          40.4,
+          18.4
+        ]
+      }
+    },
+    {
+      "id": "EMB-039",
+      "label": "Example 9",
+      "patent": "CN3109911-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "Parts by weight"
+        ],
+        "rows": [
+          [
+            "Titanium dioxide",
+            "789.0"
+          ],
+          [
+            "TGIC",
+            "158.0"
+          ],
+          [
+            "Flash rust inhibitor",
+            "53.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Titanium dioxide",
+          "TGIC",
+          "Flash rust inhibitor"
+        ],
+        "wt_pct": [
+          78.9,
+          15.8,
+          5.3
+        ]
+      }
+    },
+    {
+      "id": "EMB-040",
+      "label": "Example 9",
+      "patent": "CN4374754-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "g"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "379.0"
+          ],
+          [
+            "Leveling agent",
+            "2.0"
+          ],
+          [
+            "Acrylic resin",
+            "395.0"
+          ],
+          [
+            "Barium sulfate",
+            "158.0"
+          ],
+          [
+            "Anti-skinning agent",
+            "2.0"
+          ],
+          [
+            "Zinc phosphate",
+            "63.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "Leveling agent",
+          "Acrylic resin",
+          "Barium sulfate",
+          "Anti-skinning agent",
+          "Zinc phosphate"
+        ],
+        "wt_pct": [
+          37.9,
+          0.2,
+          39.5,
+          15.8,
+          0.2,
+          6.3
+        ]
+      }
+    },
+    {
+      "id": "EMB-041",
+      "label": "Example 4",
+      "patent": "EP2074176-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "Amount"
+        ],
+        "rows": [
+          [
+            "Alkyd resin",
+            "39.9"
+          ],
+          [
+            "Polyester resin",
+            "29.0"
+          ],
+          [
+            "Barium sulfate",
+            "14.5"
+          ],
+          [
+            "Amine hardener",
+            "8.7"
+          ],
+          [
+            "Zinc phosphate",
+            "5.8"
+          ],
+          [
+            "TGIC",
+            "2.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Alkyd resin",
+          "Polyester resin",
+          "Barium sulfate",
+          "Amine hardener",
+          "Zinc phosphate",
+          "TGIC"
+        ],
+        "wt_pct": [
+          39.9,
+          29.0,
+          14.5,
+          8.7,
+          5.8,
+          2.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-042",
+      "label": "Example 1",
+      "patent": "US4841005-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Amine hardener",
+            "15.3"
+          ],
+          [
+            "n-Butanol",
+            "7.9"
+          ],
+          [
+            "Epoxy resin E-51",
+            "57.5"
+          ],
+          [
+            "Titanium dioxide",
+            "19.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Amine hardener",
+          "n-Butanol",
+          "Epoxy resin E-51",
+          "Titanium dioxide"
+        ],
+        "wt_pct": [
+          15.3,
+          7.9,
+          57.5,
+          19.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-043",
+      "label": "Example 4",
+      "patent": "CN3219824-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Titanium dioxide",
+            "15.9"
+          ],
+          [
+            "Barium sulfate",
+            "21.2"
+          ],
+          [
+            "n-Butanol",
+            "6.6"
+          ],
+          [
+            "Acrylic resin",
+            "53.1"
+          ],
+          [
+            "TGIC",
+            "3.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Titanium dioxide",
+          "Barium sulfate",
+          "n-Butanol",
+          "Acrylic resin",
+          "TGIC"
+        ],
+        "wt_pct": [
+          15.9,
+          21.2,
+          6.6,
+          53.1,
+          3.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-044",
+      "label": "Example 7",
+      "patent": "EP6944126-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "Parts by weight"
+        ],
+        "rows": [
+          [
+            "n-Butanol",
+            "146.0"
+          ],
+          [
+            "TGIC",
+            "71.0"
+          ],
+          [
+            "Anti-skinning agent",
+            "7.0"
+          ],
+          [
+            "Xylene",
+            "118.0"
+          ],
+          [
+            "Zinc phosphate",
+            "188.0"
+          ],
+          [
+            "Polyamide 650",
+            "471.0"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "n-Butanol",
+          "TGIC",
+          "Anti-skinning agent",
+          "Xylene",
+          "Zinc phosphate",
+          "Polyamide 650"
+        ],
+        "wt_pct": [
+          14.6,
+          7.1,
+          0.7,
+          11.8,
+          18.8,
+          47.1
+        ]
+      }
+    },
+    {
+      "id": "EMB-045",
+      "label": "Example 2",
+      "patent": "US5171761-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "Polyamide 650",
+            "40.2"
+          ],
+          [
+            "Zinc phosphate",
+            "16.1"
+          ],
+          [
+            "Flash rust inhibitor",
+            "2.0"
+          ],
+          [
+            "Drier Co",
+            "1.0"
+          ],
+          [
+            "DBTL catalyst",
+            "0.4"
+          ],
+          [
+            "Barium sulfate",
+            "40.2"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Polyamide 650",
+          "Zinc phosphate",
+          "Flash rust inhibitor",
+          "Drier Co",
+          "DBTL catalyst",
+          "Barium sulfate"
+        ],
+        "wt_pct": [
+          40.2,
+          16.1,
+          2.0,
+          1.0,
+          0.4,
+          40.2
+        ]
+      }
+    },
+    {
+      "id": "EMB-046",
+      "label": "Example 2",
+      "patent": "CN8434500-like",
+      "table": {
+        "headers": [
+          "Chemical",
+          "Content (%)"
+        ],
+        "rows": [
+          [
+            "Defoamer BYK-066N",
+            "0.5"
+          ],
+          [
+            "Anti-skinning agent",
+            "0.3"
+          ],
+          [
+            "Leveling agent",
+            "0.3"
+          ],
+          [
+            "Acrylic resin",
+            "50.5"
+          ],
+          [
+            "Polyester resin",
+            "40.4"
+          ],
+          [
+            "Zinc phosphate",
+            "8.1"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Defoamer BYK-066N",
+          "Anti-skinning agent",
+          "Leveling agent",
+          "Acrylic resin",
+          "Polyester resin",
+          "Zinc phosphate"
+        ],
+        "wt_pct": [
+          0.5,
+          0.3,
+          0.3,
+          50.5,
+          40.4,
+          8.1
+        ]
+      }
+    },
+    {
+      "id": "EMB-047",
+      "label": "Example 4",
+      "patent": "EP3790237-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "44.4"
+          ],
+          [
+            "Epoxy resin E-51",
+            "41.7"
+          ],
+          [
+            "Titanium dioxide",
+            "13.9"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "Epoxy resin E-51",
+          "Titanium dioxide"
+        ],
+        "wt_pct": [
+          44.4,
+          41.7,
+          13.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-048",
+      "label": "Example 7",
+      "patent": "US5449368-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "wt.%"
+        ],
+        "rows": [
+          [
+            "Xylene",
+            "6.0"
+          ],
+          [
+            "Drier Co",
+            "0.6"
+          ],
+          [
+            "Polyamide 650",
+            "24.2"
+          ],
+          [
+            "Leveling agent",
+            "0.4"
+          ],
+          [
+            "Amine hardener",
+            "14.5"
+          ],
+          [
+            "Epoxy resin E-51",
+            "54.3"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Xylene",
+          "Drier Co",
+          "Polyamide 650",
+          "Leveling agent",
+          "Amine hardener",
+          "Epoxy resin E-51"
+        ],
+        "wt_pct": [
+          6.0,
+          0.6,
+          24.2,
+          0.4,
+          14.5,
+          54.3
+        ]
+      }
+    },
+    {
+      "id": "EMB-049",
+      "label": "Example 1",
+      "patent": "US2022698-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "Amount"
+        ],
+        "rows": [
+          [
+            "Waterborne epoxy",
+            "53.6"
+          ],
+          [
+            "TGIC",
+            "3.4"
+          ],
+          [
+            "Defoamer BYK-066N",
+            "0.6"
+          ],
+          [
+            "Xylene",
+            "5.6"
+          ],
+          [
+            "HDI trimer",
+            "27.9"
+          ],
+          [
+            "Zinc phosphate",
+            "8.9"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Waterborne epoxy",
+          "TGIC",
+          "Defoamer BYK-066N",
+          "Xylene",
+          "HDI trimer",
+          "Zinc phosphate"
+        ],
+        "wt_pct": [
+          53.6,
+          3.4,
+          0.6,
+          5.6,
+          27.9,
+          8.9
+        ]
+      }
+    },
+    {
+      "id": "EMB-050",
+      "label": "Example 9",
+      "patent": "EP9910817-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "Amount"
+        ],
+        "rows": [
+          [
+            "Polyamide 650",
+            "57.1"
+          ],
+          [
+            "Amine hardener",
+            "34.3"
+          ],
+          [
+            "TGIC",
+            "8.6"
+          ]
+        ]
+      },
+      "expected": {
+        "ingredients": [
+          "Polyamide 650",
+          "Amine hardener",
+          "TGIC"
+        ],
+        "wt_pct": [
+          57.1,
+          34.3,
+          8.6
+        ]
+      }
     }
   ]
 }

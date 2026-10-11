@@ -74,6 +74,25 @@ class TableAsset:
             raw_markdown=str(data.get("raw_markdown", "")),
         )
 
+    @classmethod
+    def from_legacy_dict(cls, data: dict, source_id: str = "",
+                         page_no: int | None = None) -> "TableAsset":
+        """P1-4: 旧文本解析 dict → TableAsset（表格解析统一）。
+
+        旧格式：{headers, rows, label, page_hint, table_id?, kind?}
+        """
+        return cls(
+            table_id=str(data.get("table_id") or ""),
+            source_id=source_id,
+            page_no=page_no or data.get("page_hint") or 1,
+            caption=str(data.get("label") or data.get("caption") or ""),
+            provenance={"origin": "legacy_text_parse"},
+            kind=str(data.get("kind") or "other"),
+            headers=list(data.get("headers") or []),
+            rows=list(data.get("rows") or []),
+            raw_markdown="",
+        )
+
 
 @dataclass
 class MdBlock:

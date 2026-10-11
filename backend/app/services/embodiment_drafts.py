@@ -697,9 +697,24 @@ def extract_embodiment_draft(
     text, _chunk_meta = _collect_source_text(source_id)
     # v2 P0-7: 优先消费 TableAsset sidecar（解析器已结构化、带真实页码），
     # 无 sidecar 时回退到文本表格解析（原行为）。
-    tables = _tables_from_sidecar(source_id)
-    if not tables:
-        tables = parse_markdown_tables(text) + parse_html_tables(text)
+    # P1-4: 统一为 TableAsset 中间态 —— 两路都先转 TableAsset（规范校验），
+    # 再转 dict 供下游消费。TableAsset 是唯一的结构化标准。
+    from .table_contract import TableAsset
+    raw_tables: list = _tables_from_sidecar(source_id)
+    if not raw_tables:
+        legacy = parse_markdown_tables(text) + parse_html_tables(text)
+        assets = [TableAsset.from_legacy_dict(t, source_id=source_id) for t in legacy]
+    else:
+        assets = [t if isinstance(t, TableAsset)
+                  else TableAsset.from_legacy_dict(t, source_id=source_id)
+                  for t in raw_tables]
+    # 统一转 dict（含 label/page_hint/table_id 补充），下游接口不变
+    tables: list[dict[str, Any]] = []
+    for a in assets:
+        d = a.to_dict()
+        d["label"] = a.caption or "Example"
+        d["page_hint"] = a.page_no
+        tables.append(d)
     scored: list[tuple[float, dict[str, Any]]] = []
     for t in tables:
         emb_row = table_to_ingredients(t)

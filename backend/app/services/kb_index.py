@@ -790,6 +790,17 @@ def index_source(
         n = get_chunk_store().replace_for_source(source_id, rows)
         # W2-1 (P1-6): chunk-level FTS5 mirrors the persisted KB rows.
         _sync_source_fts(source_id, rows, settings)
+        # P1-3: 结构指纹索引（fail-open，不影响主流程）
+        if rows:
+            try:
+                from .structure_index import index_chunk_structures, rdkit_available
+                if rdkit_available():
+                    for r in rows:
+                        cid = r.get("id")
+                        if cid:
+                            index_chunk_structures(cid, source_id, r.get("text", ""))
+            except Exception:
+                pass
         # v16 P2-7: DB 写成功后再 bump 覆盖率（写失败不虚增）。
         if rows:
             _old_total, _old_emb, _old_en, _old_zh = _old_counts
