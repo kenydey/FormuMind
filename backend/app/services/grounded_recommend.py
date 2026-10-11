@@ -344,8 +344,22 @@ def _ground_component(
             "evidence_refs": refs,
             "evidence_details": details,
             "grounding_confidence": conf,
+            # N-6: 推荐解释 —— 为什么选这个成分
+            "selection_reason": _selection_reason(comp, conf, refs),
         }
     )
+
+
+def _selection_reason(comp, conf: str, refs: list) -> str:
+    """N-6: 生成成分选择解释。"""
+    name = getattr(comp, "name", "")
+    if conf == "high" and refs:
+        return f"{name} 在 {len(refs)} 篇文献/专利中提及，证据充分"
+    elif conf == "medium":
+        return f"{name} 在材料库中有记录，建议人工确认配比"
+    elif conf == "low":
+        return f"{name} 缺乏直接证据，基于化学相似性推荐"
+    return ""
 
 
 def _formula_catalog_score(rec: RecommendedFormula, catalog: set[str], catalog_cas: set[str]) -> float:

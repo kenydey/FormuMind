@@ -938,6 +938,14 @@ class Settings(BaseSettings):
     dynamic_alpha_enabled: bool = True
     # D-5: PDF 下载前 HEAD 预检（大小/类型）。默认开启（2026-10-11 Cheng 批准）。
     pdf_precheck_enabled: bool = True
+    # N-2/N-3: 配方化学有效性校验 + 兼容性检查。默认开启。
+    chem_validate_enabled: bool = True
+    # N-1: 多候选共识（生成 3N 聚类选中心）。默认关闭（增加 LLM 成本）。
+    recommend_consensus_enabled: bool = False
+    # N-4: 提示词模板 A/B 优选。默认关闭。
+    prompt_ab_enabled: bool = False
+    # N-5: 配比智能补全。默认开启。
+    ratio_completion_enabled: bool = True
     # 增量 #11: 推荐 A/B 实验开关。开启后按用户 ID 哈希分流，
     # 实验组用不同 MMR 多样性参数。默认关闭。
     recommend_ab_enabled: bool = False

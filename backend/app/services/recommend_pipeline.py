@@ -87,18 +87,29 @@ def run_recommend_orchestration(
         logger.info("recommend A/B: user %s → %s (recommend_id=%s)",
                     ab_user_id[:8], ab_group, recommend_id[:8])
 
+    # N-4: 提示词模板 A/B —— 按 recommend_id 哈希分流，跟踪接地通过率
+    prompt_variant = "v1"
+    if getattr(settings, "prompt_ab_enabled", False):
+        _ph = int(hashlib.md5(recommend_id.encode()).hexdigest()[:8], 16)
+        prompt_variant = "v2" if _ph % 2 == 0 else "v1"
+        logger.info("recommend prompt A/B: %s → %s", recommend_id[:8], prompt_variant)
+
     if synth_override is not None:
         rec_resp = synth_override
     else:
         from ..services import llm
 
         llm_n = llm_candidate_count(n, settings=settings)
+        # N-4: v2 变体在 modify_prompt 前加约束强调
+        _mp = modify_prompt
+        if prompt_variant == "v2" and not synth_override:
+            _mp = ("【重要】每个成分必须给出 CAS 号或分子式，配比总和必须为 100%。\n" + _mp) if _mp else "【重要】每个成分必须给出 CAS 号或分子式，配比总和必须为 100%。"
         rec_resp = llm.recommend_formulations(
             req,
             objectives,
             evidence,
             n=llm_n,
-            modify_prompt=modify_prompt,
+            modify_prompt=_mp,
             base_formulas=base_formulas,
         )
     warnings: list[str] = list(rec_resp.warnings)
@@ -138,6 +149,62 @@ def run_recommend_orchestration(
     )
 
 
+def _complete_ratios(form) -> None:
+    """N-5: 配比智能补全。缺失 weight_pct 时按成分类型默认分布补全。
+
+    规则（涂料典型配比）：
+    - 树脂/基料：40-60%
+    - 颜料/填料：20-40%
+    - 溶剂：10-30%
+    - 助剂：0.5-5%
+    缺失时按类型分配，剩余按比例归一化到 100%。
+    """
+    ingredients = getattr(form, "ingredients", None) or getattr(form, "components", []) or []
+    if not ingredients:
+        return
+    # 类型关键词 → 默认配比
+    _defaults = [
+        (("resin", "树脂", "基料", "epoxy", "环氧"), 50.0),
+        (("pigment", "颜料", "tio2", "钛白"), 25.0),
+        (("filler", "填料", "碳酸钙", "滑石"), 15.0),
+        (("solvent", "溶剂", "二甲苯", "丁醇"), 15.0),
+        (("additive", "助剂", "分散剂", "消泡剂", "流平剂"), 2.0),
+        (("hardener", "固化剂", "amine", "胺"), 10.0),
+    ]
+    total_given = 0.0
+    missing = []
+    for ing in ingredients:
+        wp = getattr(ing, "weight_pct", None)
+        if wp and wp > 0:
+            total_given += wp
+        else:
+            missing.append(ing)
+    if not missing:
+        return
+    # 为缺失的分配默认值
+    for ing in missing:
+        name = (getattr(ing, "name", "") or "").lower()
+        default = 5.0  # 兜底
+        for keywords, pct in _defaults:
+            if any(kw in name for kw in keywords):
+                default = pct
+                break
+        try:
+            ing.weight_pct = default
+        except Exception:
+            pass
+        total_given += default
+    # 归一化到 100
+    if total_given > 0:
+        factor = 100.0 / total_given
+        for ing in ingredients:
+            try:
+                wp = getattr(ing, "weight_pct", 0) or 0
+                ing.weight_pct = round(wp * factor, 2)
+            except Exception:
+                pass
+
+
 def resolve_recommend_n(requested: int | None, *, settings: Settings | None = None) -> int:
     settings = settings or get_settings()
     n = requested if requested is not None else settings.recommend_default_n
@@ -146,6 +213,9 @@ def resolve_recommend_n(requested: int | None, *, settings: Settings | None = No
 
 def llm_candidate_count(requested_n: int, *, settings: Settings | None = None) -> int:
     settings = settings or get_settings()
+    # N-1: 多候选共识 —— 生成 3N 候选，聚类后选中心（需 diversity 启用）
+    if getattr(settings, "recommend_consensus_enabled", False) and requested_n > 1:
+        return min(requested_n * 3, settings.recommend_max_n)
     if settings.recommend_diversity_enabled and requested_n > 1:
         return min(requested_n * 2, settings.recommend_max_n)
     return requested_n
@@ -161,6 +231,30 @@ def finalize_scored_formulations(
     settings = settings or get_settings()
     scored.sort(key=lambda f: (f.score or 0.0), reverse=True)
     scored, dedup_notes = chemtools.dedupe_similar_formulations(scored)
+
+    # N-1: 多候选共识 —— 3N 候选中按成分聚类，选每类最高分（减少 LLM 方差）
+    if getattr(settings, "recommend_consensus_enabled", False) and len(scored) > n:
+        try:
+            from .recommend_diversity import formulation_similarity
+            # 简单聚类：按相似度阈值分组
+            clusters: list[list] = []
+            for f in scored:
+                placed = False
+                for cl in clusters:
+                    if formulation_similarity(f, cl[0]) > 0.8:
+                        cl.append(f)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([f])
+            # 每类取最高分
+            scored = sorted(
+                [max(cl, key=lambda x: x.score or 0.0) for cl in clusters],
+                key=lambda x: x.score or 0.0, reverse=True,
+            )
+            dedup_notes.append(f"N-1 共识：{len(clusters)} 簇中优选")
+        except Exception:
+            pass
 
     diversity_applied = False
     if settings.recommend_diversity_enabled and len(scored) > n:
@@ -316,6 +410,21 @@ def finalize_recommendation_bundle(
     _rescore_with_shared_bounds(scored, objectives, process)
     for form in scored:
         warnings.extend(check_formulation_predictions(form, evidence))
+    # N-2/N-3: 化学有效性校验 + 兼容性检查（fail-open）
+    if getattr(settings, "chem_validate_enabled", True):
+        try:
+            from .chem_validate import validate_formula_chemistry
+            for form in scored:
+                warnings.extend(validate_formula_chemistry(form))
+        except Exception:
+            pass
+    # N-5: 配比智能补全 —— 缺失配比时按成分类型默认分布补全
+    if getattr(settings, "ratio_completion_enabled", True):
+        try:
+            for form in scored:
+                _complete_ratios(form)
+        except Exception:
+            pass
 
     scored, aligned_formulas, dedup_notes, diversity_applied = finalize_scored_formulations(
         rec_formulas,
