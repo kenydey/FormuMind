@@ -75,5 +75,9 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
+    // The suite runs ~140 jsdom files in parallel; on a 2-core CI runner the first test of a file that pulls in
+    // the whole api module (and renders a modal) can exceed vitest's 5 s default without anything being wrong.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 });
