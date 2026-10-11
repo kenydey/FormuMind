@@ -314,6 +314,8 @@ class RecommendedFormulaComponent(BaseModel):
     # v20-1: 引用可解释性明细（与 evidence_refs 一一对应，向后兼容）。
     evidence_details: list[EvidenceRef] = Field(default_factory=list)
     grounding_confidence: Literal["high", "medium", "low"] = "high"
+    # N-6: 推荐解释 —— 为什么选这个成分（基于接地可信度自动生成）
+    selection_reason: str = ""
 
 class RecommendedFormula(BaseModel):
     """Structured formulation recommendation from the LLM recommend engine."""
