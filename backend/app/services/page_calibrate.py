@@ -23,7 +23,7 @@ def calibrate_page_numbers(
     """
     try:
         if not bookmarks or not approx_pages or total_pages <= 0:
-            return approx_pages
+            return approx_pages or []
 
         # 书签按页码排序
         sorted_bm = sorted(bookmarks, key=lambda b: b.get("page", 0))
