@@ -443,8 +443,11 @@ secret: str,
     """v2 P1-8: EPO OPS 全文下载（description + claims → 文本）。
 
     ``publication`` 如 ``"EP1000000A1"``。流程：biblio 检索取 docdb（含日期）
-    → ``/fulltext`` 取全文 XML → 抽文本。凭证未配置 / 不可达 / 无全文时
-    返回 None（fail-open），不抛异常。
+    → ``/description`` + ``/claims`` 取全文 XML → 抽文本。凭证未配置 /
+    不可达 / 无全文时返回 None（fail-open），不抛异常。
+
+    注意：``/fulltext`` 端点只返回 inquiry（实例列表），正文需走
+    ``/description`` 和 ``/claims`` 端点（2026-10-11 生产验证发现）。
 
     注意 OPS 配额：全文请求同样计入配额，调用方应节流。
     """
@@ -458,12 +461,27 @@ secret: str,
     if not compact:
         return None
 
+    def _fetch_endpoint(owned: httpx.Client, token: str, docdb: str,
+                        endpoint: str) -> str | None:
+        """取单个端点（description/claims）的文本，失败返回 None。"""
+        url = f"{BASE_URL}/rest-services/published-data/publication/docdb/{docdb}/{endpoint}"
+        try:
+            resp = owned.get(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
+            )
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        return _fulltext_text(resp.content)
+
     def _run(owned: httpx.Client) -> str | None:
         try:
             token = access_token(owned, key, secret)
         except EpoOpsError:
             return None
-        # biblio 取 docdb（含 publication date，fulltext URL 必需）
+        # biblio 取 docdb（含 publication date，URL 必需）
         try:
             result = _search(owned, f"pn={compact}", key, secret, 1, 1)
         except EpoOpsError:
@@ -474,28 +492,23 @@ secret: str,
         if not (hit.date and hit.kind):
             return None
         docdb = f"{hit.country}.{hit.number}.{hit.kind}.{hit.date}"
-        url = FULLTEXT_URL_TMPL.format(docdb=docdb)
-        try:
-            resp = owned.get(
-                url,
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
-            )
-        except httpx.HTTPError:
+        parts = []
+        for endpoint in ("description", "claims"):
+            text = _fetch_endpoint(owned, token, docdb, endpoint)
+            if text is None:
+                # 可能是 token 过期，刷新后重试一次
+                try:
+                    token = access_token(owned, key, secret, force=True)
+                    text = _fetch_endpoint(owned, token, docdb, endpoint)
+                except EpoOpsError:
+                    pass
+            if text:
+                parts.append(text)
+        if not parts:
             return None
-        if _token_rejected(resp):
-            try:
-                token = access_token(owned, key, secret, force=True)
-                resp = owned.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
-                )
-            except (httpx.HTTPError, EpoOpsError):
-                return None
-        if resp.status_code != 200:
-            return None
-        text = _fulltext_text(resp.content)
-        if text and len(text.strip()) > 200:
-            return text
+        full = "\n\n".join(parts)
+        if len(full.strip()) > 200:
+            return full
         return None
 
     try:

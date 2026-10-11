@@ -432,6 +432,10 @@ FULLTEXT_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <ft:description>
     <p>The present invention relates to an epoxy coating composition. """ + "Epoxy resin is cured with a polyamide hardener. " * 20 + """</p>
   </ft:description>
+</ft:fulltext>"""
+
+CLAIMS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<ft:fulltext xmlns:ft="http://www.epo.org/fulltext">
   <ft:claims>
     <p>1. A coating composition comprising an epoxy resin and a hardener.</p>
   </ft:claims>
@@ -459,9 +463,11 @@ def _fulltext_client(monkeypatch):
             return httpx.Response(200, json=TOKEN_OK)
         if "/search/biblio" in path:
             return httpx.Response(200, json=_BIBLIO_HIT)
-        if "/fulltext" in path:
+        if path.endswith("/description"):
             assert "EP.1000000.A1.20070103" in str(request.url), f"docdb URL wrong: {request.url}"
             return httpx.Response(200, content=FULLTEXT_XML.encode(), headers={"content-type": "application/xml"})
+        if path.endswith("/claims"):
+            return httpx.Response(200, content=CLAIMS_XML.encode(), headers={"content-type": "application/xml"})
         return httpx.Response(404, text=NOT_FOUND)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -478,7 +484,9 @@ def test_fetch_fulltext_happy_path(monkeypatch):
     text = epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client)
     assert text and "epoxy coating composition" in text
     assert "## description" in text
-    assert any("/fulltext" in u for u in seen)
+    assert "## claims" in text
+    assert any("/description" in u for u in seen)
+    assert any("/claims" in u for u in seen)
 
 
 def test_fetch_fulltext_no_biblio_hit_returns_none():
