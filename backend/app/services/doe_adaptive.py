@@ -39,11 +39,15 @@ def adapt_factor_ranges(factors: list, results: list[dict]) -> list:
             f_high = getattr(f, "high", 1)
             best_val = best.get(fname, (f_low + f_high) / 2)
             span = f_high - f_low
-            # 边界附近则扩展
+            # 边界附近则扩展（不突破物理零点）
             if best_val <= f_low + span * 0.1:
-                f.low = max(f_low - span * 0.2, f_low - span)
+                new_low = f_low - span * 0.2
+                # 若原下限 >=0，不扩展到负数
+                if f_low >= 0:
+                    new_low = max(new_low, 0)
+                f.low = new_low
             elif best_val >= f_high - span * 0.1:
-                f.high = min(f_high + span * 0.2, f_high + span)
+                f.high = f_high + span * 0.2
         return adapted
     except Exception:
         return factors

@@ -44,6 +44,7 @@ def _load_history(days: int = 30) -> list[dict]:
 def record_feedback(query: str, precision: float, recall: float, threshold_used: dict) -> None:
     """记录一次查询的反馈（供后续自适应）。"""
     try:
+        import fcntl
         _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": time.time(),
@@ -53,7 +54,12 @@ def record_feedback(query: str, precision: float, recall: float, threshold_used:
             "threshold": threshold_used,
         }
         with open(_HISTORY_FILE, "a") as f:
-            f.write(json.dumps(record) + "\n")
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except Exception:
         pass
 

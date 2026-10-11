@@ -26,6 +26,7 @@ def track_recommendation(
 ) -> None:
     """记录一次推荐的 A/B 数据。fail-open。"""
     try:
+        import fcntl
         _TRACK_FILE.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": time.time(),
@@ -36,7 +37,12 @@ def track_recommendation(
             "n_candidates": n_candidates,
         }
         with open(_TRACK_FILE, "a") as f:
-            f.write(json.dumps(record) + "\n")
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except Exception:
         pass
 

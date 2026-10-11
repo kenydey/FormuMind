@@ -180,19 +180,24 @@ def _verification_doe_for(
 def _pareto_frontier(forms: list, metrics: list[str]) -> list[int]:
     """P2: 识别帕累托前沿（非支配解索引）。
 
-    假设所有指标越大越好（成本类已取负）。
+    cost 类指标（名称含 cost）为越小越好，其余为越大越好。
     """
+    # 越小越好的指标（成本类）
+    MINIMIZE_KEYWORDS = ("cost", "price", "time")
     try:
         n = len(forms)
         if n <= 1:
             return list(range(n))
-        # 提取指标值
+        # 提取指标值，成本类取负统一为越大越好
         vals = []
         for f in forms:
             row = []
             pred = getattr(f, "predicted", {}) or {}
             for m in metrics:
-                row.append(float(pred.get(m, 0) or 0))
+                v = float(pred.get(m, 0) or 0)
+                if any(kw in m.lower() for kw in MINIMIZE_KEYWORDS):
+                    v = -v  # 成本类取负
+                row.append(v)
             vals.append(row)
         pareto = []
         for i in range(n):
