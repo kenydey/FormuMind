@@ -423,3 +423,83 @@ def test_cpc_classes_are_quoted_and_joined_with_or_and_limited_to_two():
 @pytest.mark.parametrize("query", ["", "   ", "镁合金无铬钝化", "of the and", None])
 def test_nothing_searchable_is_no_query(query):
     assert epo_ops.build_cql(query) is None
+
+
+# ── v2 P1-8: fetch_fulltext ──────────────────────────────────────────────────
+
+FULLTEXT_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<ft:fulltext xmlns:ft="http://www.epo.org/fulltext">
+  <ft:description>
+    <p>The present invention relates to an epoxy coating composition. """ + "Epoxy resin is cured with a polyamide hardener. " * 20 + """</p>
+  </ft:description>
+  <ft:claims>
+    <p>1. A coating composition comprising an epoxy resin and a hardener.</p>
+  </ft:claims>
+</ft:fulltext>"""
+
+_BIBLIO_HIT = {
+    "ops:biblio-search": {"@total-result-count": "1"},
+    "ops:world-patent-data": {
+        "exchange-documents": {
+            "exchange-document": [
+                _doc("EP", "1000000", "A1", "20070103", titles={"en": "Coating"}, family="1")
+            ]
+        }
+    },
+}
+
+
+def _fulltext_client(monkeypatch):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        path = urlparse(str(request.url)).path
+        if path.endswith("/auth/accesstoken"):
+            return httpx.Response(200, json=TOKEN_OK)
+        if "/search/biblio" in path:
+            return httpx.Response(200, json=_BIBLIO_HIT)
+        if "/fulltext" in path:
+            assert "EP.1000000.A1.20070103" in str(request.url), f"docdb URL wrong: {request.url}"
+            return httpx.Response(200, content=FULLTEXT_XML.encode(), headers={"content-type": "application/xml"})
+        return httpx.Response(404, text=NOT_FOUND)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return client, seen
+
+
+def test_fetch_fulltext_needs_credentials():
+    assert epo_ops.fetch_fulltext("EP1000000A1", key="", secret="") is None
+    assert epo_ops.fetch_fulltext("EP1000000A1", key="k", secret="") is None
+
+
+def test_fetch_fulltext_happy_path(monkeypatch):
+    client, seen = _fulltext_client(monkeypatch)
+    text = epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client)
+    assert text and "epoxy coating composition" in text
+    assert "## description" in text
+    assert any("/fulltext" in u for u in seen)
+
+
+def test_fetch_fulltext_no_biblio_hit_returns_none():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = urlparse(str(request.url)).path
+        if path.endswith("/auth/accesstoken"):
+            return httpx.Response(200, json=TOKEN_OK)
+        return httpx.Response(404, text=NOT_FOUND)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert epo_ops.fetch_fulltext("EP9999999A1", key=KEY, secret=SECRET, client=client) is None
+
+
+def test_fetch_fulltext_xml_parse_failure_returns_none():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = urlparse(str(request.url)).path
+        if path.endswith("/auth/accesstoken"):
+            return httpx.Response(200, json=TOKEN_OK)
+        if "/search/biblio" in path:
+            return httpx.Response(200, json=_BIBLIO_HIT)
+        return httpx.Response(200, content=b"not xml at all {{{")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client) is None

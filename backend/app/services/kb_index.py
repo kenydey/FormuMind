@@ -476,6 +476,17 @@ def ingest_full_document(source_id: str, text: str, metadata: dict | None = None
         return degrade_return(logger, exc, "ingest_full_document failed", 0)
 
 
+def _is_patent_source(source_id: str) -> bool:
+    """v2 P1-10: 是否为专利源（Example N 感知切分的开关）。fail-open → False。"""
+    try:
+        from ..db.source_store import get_source_store
+
+        doc = get_source_store().get(source_id)
+        return bool(doc and str(doc.source_kind or "").lower() == "patent")
+    except Exception:
+        return False
+
+
 def prepare_chunk_rows(
     full_text: str,
     source_id: str,
@@ -504,10 +515,12 @@ def prepare_chunk_rows(
 
     settings = get_settings()
     with timing.span("chunk"):
+        # v2 P1-10: 专利 Example N 感知切分 —— 专利源按示例边界切分。
         chunks = chunk_markdown(
             full_text,
             max_chars=settings.ingest_chunk_max_chars,
             overlap=settings.ingest_chunk_overlap,
+            example_aware=_is_patent_source(source_id),
         )
         from .kb_retrieval_gate import chunk_floor, is_formula_text
 

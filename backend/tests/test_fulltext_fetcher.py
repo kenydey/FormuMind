@@ -6,6 +6,7 @@ import pytest
 from app.config import get_settings
 from app.domain.schemas import Evidence
 from app.services import fulltext_fetcher as ff
+from app.services.pdf_downloader import FetchedFulltext
 
 
 LONG_TEXT = "\n\n".join(
@@ -97,8 +98,11 @@ def test_literature_fetch_error_reasons(monkeypatch):
 
 
 def test_disabled_flag_is_strict_noop(monkeypatch):
+    # v2 P0-1: fulltext_enrich 默认 True；本测试显式关闭验证 strict noop。
+    monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "false")
+    get_settings.cache_clear()
     called = []
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: called.append(ev) or LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: called.append(ev) or FetchedFulltext(text=LONG_TEXT))
     rows = [_ev("US1234567")]
     out, report = ff.enrich_search_results(rows)
     assert out == rows
@@ -108,7 +112,7 @@ def test_disabled_flag_is_strict_noop(monkeypatch):
 
 def test_patent_hit_replaced_by_fulltext_chunks(monkeypatch):
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     persisted = []
     monkeypatch.setattr(ff, "_persist_fulltext", lambda text, ev, kind, **kw: persisted.append((ev.identifier, kind)) or "sid")
 
@@ -140,7 +144,7 @@ def test_max_docs_cap(monkeypatch):
 
     def fake_fetch(ev, t):
         calls.append(ev.identifier)
-        return LONG_TEXT
+        return FetchedFulltext(text=LONG_TEXT)
 
     monkeypatch.setattr(ff, "_fetch_patent_text", fake_fetch)
     rows = [_ev("US1110001"), _ev("US2220002"), _ev("US3330003")]
@@ -202,7 +206,11 @@ def test_literature_oa_flow(monkeypatch):
     monkeypatch.setattr(
         "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
     )
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        "app.services.pdf_downloader._parse_pdf_bytes",
+        lambda content: SimpleNamespace(ok=True, markdown=LONG_TEXT, tables=[]),
+    )
     out, report = ff.enrich_search_results(
         [_ev("10.1016/j.porgcoat.2020.105678", source="OpenAlex")], persist=False
     )
@@ -218,7 +226,11 @@ def test_arxiv_identifier_resolves_pdf_url(monkeypatch):
     monkeypatch.setattr(
         "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
     )
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        "app.services.pdf_downloader._parse_pdf_bytes",
+        lambda content: SimpleNamespace(ok=True, markdown=LONG_TEXT, tables=[]),
+    )
 
     out, report = ff.enrich_search_results([_ev("arXiv:2401.12345", source="OpenAlex")], persist=False)
     assert report.by_kind == {"literature": 1}
@@ -231,7 +243,11 @@ def test_doi_literature_fetch_uses_oa_pdf(monkeypatch):
     monkeypatch.setattr(
         "app.services.pdf_downloader.fetch_pdf_ex", lambda url, timeout=20: (b"%PDF-fake", "ok")
     )
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        "app.services.pdf_downloader._parse_pdf_bytes",
+        lambda content: SimpleNamespace(ok=True, markdown=LONG_TEXT, tables=[]),
+    )
 
     out, report = ff.enrich_search_results(
         [_ev("10.1016/j.porgcoat.2020.105678", source="OpenAlex")], persist=False
@@ -241,7 +257,7 @@ def test_doi_literature_fetch_uses_oa_pdf(monkeypatch):
 
 def test_chunks_carry_provenance_and_relevance_decay(monkeypatch):
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     out, _ = ff.enrich_search_results([_ev("US7770007", relevance=0.9)], persist=False)
     assert out[0].source == "USPTO"
     assert out[0].relevance == pytest.approx(0.9)
@@ -424,8 +440,9 @@ def test_openalex_content_handles_gzipped_tei(monkeypatch):
     }
     monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
 
-    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
-    assert text and "cerium nitrate" in text
+    hit = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert hit and "cerium nitrate" in hit.text
+    assert hit.pdf_bytes is None and hit.tables is None, "TEI tier carries no PDF bytes"
 
 
 def test_openalex_content_tier_needs_a_key(monkeypatch):
@@ -459,8 +476,9 @@ def test_openalex_content_prefers_tei_over_pdf(monkeypatch):
     }
     monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
 
-    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
-    assert text and "cerium nitrate" in text
+    hit = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert hit and "cerium nitrate" in hit.text
+    assert hit.pdf_bytes is None and hit.tables is None, "TEI tier carries no PDF bytes"
     assert any(".grobid-xml" in u for u in _FakeClient.seen)
     assert not any(u.endswith(".pdf") for u in _FakeClient.seen), "PDF must not be fetched when TEI works"
 
@@ -474,10 +492,16 @@ def test_openalex_content_falls_back_to_pdf_when_tei_missing(monkeypatch):
         ".pdf": _FakeResp(200, content=b"%PDF-fake"),
     }
     monkeypatch.setattr(ff.httpx, "Client", _FakeClient)
-    monkeypatch.setattr("app.services.pdf_downloader._extract_text", lambda content: LONG_TEXT)
+    from types import SimpleNamespace
 
-    text = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
-    assert text == LONG_TEXT
+    monkeypatch.setattr(
+        "app.services.pdf_downloader._parse_pdf_bytes",
+        lambda content: SimpleNamespace(ok=True, markdown=LONG_TEXT, tables=[]),
+    )
+
+    hit = ff._openalex_content_text(_ev("10.3390/coatings11040392", source="OpenAlex"), 5)
+    assert hit.text == LONG_TEXT
+    assert hit.pdf_bytes == b"%PDF-fake", "v2 P0-6: PDF bytes must survive"
     assert any(u.endswith(".pdf") for u in _FakeClient.seen)
 
 
@@ -498,7 +522,7 @@ def test_literature_fetch_prefers_openalex_content(monkeypatch):
     """A content-archive hit must short-circuit the publisher chain entirely —
     that is the whole point: those URLs are what answer 403."""
     _enable(monkeypatch)
-    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t, **kw: LONG_TEXT)
+    monkeypatch.setattr(ff, "_openalex_content_text", lambda ev, t, **kw: FetchedFulltext(text=LONG_TEXT))
     publisher_hits: list = []
 
     def _no_oa(ev, t):
@@ -523,3 +547,63 @@ def test_literature_fetch_falls_through_when_content_misses(monkeypatch):
     with pytest.raises(ff.FetchError) as e:
         ff._fetch_literature_text(_ev("10.3390/coatings11040392", source="OpenAlex"), timeout=5)
     assert e.value.reason == "无 OA 版本"
+
+
+# ── v2 P0-6: PDF 字节 + 表格 sidecar ──────────────────────────────────────────
+
+
+def test_persist_fulltext_saves_pdf_sidecars(monkeypatch, tmp_path):
+    """PDF tier 的字节与表格必须落盘（source_files + table sidecar），fail-open。"""
+    from types import SimpleNamespace
+
+    from app.services import source_files as sf
+
+    monkeypatch.setattr(sf, "source_files_dir", lambda: tmp_path)
+    saved_tables = []
+    monkeypatch.setattr(
+        "app.services.parsing.persist_table_sidecar",
+        lambda source_id, tables: saved_tables.append((source_id, tables)),
+    )
+    # 隔离真实 DB：用内存 store
+    from app.db.database import make_engine, make_session_factory
+    from app.db import source_store as ss_mod
+    from app.db.models import Base
+
+    eng = make_engine(f"sqlite:///{tmp_path}/t.db")
+    Base.metadata.create_all(eng)
+    monkeypatch.setattr(ss_mod, "get_source_store", lambda: ss_mod.SourceStore(make_session_factory(eng)))
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda *a, **k: 1)
+    monkeypatch.setattr("app.services.kb_index.kb_enabled", lambda: True)
+
+    fake_table = SimpleNamespace(page_no=3)
+    sid = ff._persist_fulltext(
+        LONG_TEXT, _ev("US1234567"), "patent",
+        pdf_bytes=b"%PDF-fake-bytes",
+        tables=[fake_table],
+    )
+    assert sid
+    # PDF 落盘
+    pdf_path = tmp_path / f"{sid}.pdf"
+    assert pdf_path.exists() and pdf_path.read_bytes() == b"%PDF-fake-bytes"
+    # 表格 sidecar
+    assert len(saved_tables) == 1 and saved_tables[0][0] == sid
+
+
+def test_persist_fulltext_sidecar_fail_open(monkeypatch, tmp_path):
+    """sidecar 失败不影响文本入库（fail-open）。"""
+    from app.db.database import make_engine, make_session_factory
+    from app.db import source_store as ss_mod
+    from app.db.models import Base
+
+    eng = make_engine(f"sqlite:///{tmp_path}/t.db")
+    Base.metadata.create_all(eng)
+    monkeypatch.setattr(ss_mod, "get_source_store", lambda: ss_mod.SourceStore(make_session_factory(eng)))
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda *a, **k: 1)
+    monkeypatch.setattr("app.services.kb_index.kb_enabled", lambda: True)
+
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(ff, "_persist_pdf_sidecars", boom)
+    sid = ff._persist_fulltext(LONG_TEXT, _ev("US1234567"), "patent", pdf_bytes=b"%PDF-x")
+    assert sid, "sidecar 失败也必须返回 source_id"

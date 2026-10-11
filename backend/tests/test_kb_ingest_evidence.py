@@ -9,6 +9,7 @@ from app.db.database import Base, make_engine, make_session_factory
 from app.domain.schemas import Evidence
 from app.services import fulltext_fetcher as ff
 from app.services import kb_ingest
+from app.services.pdf_downloader import FetchedFulltext
 from app.services.patent_ids import (
     canonical_origin_url,
     normalize_patent_pub,
@@ -99,7 +100,7 @@ def test_ingest_evidence_mock_success_and_skip(stores, monkeypatch):
     def fake_dispatch(kind, ev, timeout, **kw):
         assert kind == "patent"
         assert normalize_patent_pub(ev.identifier)[1] == "CN104789083B"
-        return LONG_TEXT
+        return FetchedFulltext(text=LONG_TEXT)
 
     monkeypatch.setattr(ff, "_dispatch_fetch", fake_dispatch)
     monkeypatch.setattr("app.services.kb_index.index_source", lambda *a, **k: 1)
@@ -183,12 +184,15 @@ def test_fetch_patent_uses_compact(monkeypatch):
     seen: list[str] = []
 
     def fake_fetch(pub, timeout=20):
+        from app.services.pdf_downloader import FetchedFulltext
+
         seen.append(pub)
-        return LONG_TEXT
+        return FetchedFulltext(text=LONG_TEXT)
 
     monkeypatch.setattr(
-        "app.services.pdf_downloader.fetch_patent_text", fake_fetch
+        "app.services.pdf_downloader.fetch_patent_fulltext", fake_fetch
     )
-    text = ff._fetch_patent_text(_ev(), timeout=5)
+    hit = ff._fetch_patent_text(_ev(), timeout=5)
+    text = hit.text if hit else None
     assert text and len(text) > 200
     assert seen == ["CN104789083B"]

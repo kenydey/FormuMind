@@ -75,6 +75,62 @@ class ParseResult:
         return bool(self.markdown.strip())
 
 
+def _maybe_extract_embedded_structures(result: ParseResult, content: bytes) -> ParseResult:
+    """v2 P1-9: embedded_images() 接线 —— PDF 内嵌结构图 → vision → SMILES 入库。
+
+    开关 ``pdf_embedded_image_vision``（默认关：vision 调用有成本，需显式开启）。
+    每页内嵌图 → vision_extract.extract_image → 分子结构表以页码标记追加到
+    markdown，后续 chunking 正常入库检索。全部 fail-open。
+    """
+    try:
+        from ..config import get_settings
+
+        if not bool(getattr(get_settings(), "pdf_embedded_image_vision", False)):
+            return result
+        from . import pdf_local
+        from .vision_extract import extract_image, image_markdown, vision_available
+    except Exception:
+        return result
+    try:
+        can_see, _hint = vision_available()
+        if not can_see:
+            return result
+        n_pages = pdf_local.page_count(content)
+    except Exception:
+        return result
+    max_figs = 10  # 成本护栏：每篇最多 10 张图走 vision
+    done = 0
+    extra: list[str] = []
+    for page_no in range(1, n_pages + 1):
+        if done >= max_figs:
+            break
+        try:
+            images = pdf_local.embedded_images(content, page_no)
+        except Exception:
+            continue
+        for i, img in enumerate(images):
+            if done >= max_figs:
+                break
+            if not img or len(img) < 5120:  # <5KB 多为图标/装饰，跳过
+                continue
+            done += 1
+            try:
+                extraction, _err = extract_image(img, f"p{page_no}-fig{i}.png")
+            except Exception:
+                continue
+            if extraction is None:
+                continue
+            mols = getattr(extraction, "molecules", None) or []
+            if not mols and not (getattr(extraction, "markdown", "") or "").strip():
+                continue
+            rendered = image_markdown(extraction, f"p{page_no}-fig{i}.png")
+            extra.append(f"<!-- page:{page_no} -->\n\n{rendered}")
+    if extra:
+        result.markdown = result.markdown.rstrip() + "\n\n## 内嵌结构图识别\n\n" + "\n\n".join(extra)
+        logger.info("pdf embedded structures: %d figures appended", done)
+    return result
+
+
 def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
     """W2-3 wiring: table-contract extraction on the successful parse path.
 
@@ -1187,7 +1243,7 @@ def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> Pa
                         _bm_on = False
                     if _bm_on and not final.bookmarks:
                         final.bookmarks = _read_pdf_bookmarks(content)
-                    return _maybe_extract_tables(final, content)
+                    return _maybe_extract_embedded_structures(_maybe_extract_tables(final, content), content)
             timing.note(parser="none")
             return ParseResult("", "none")
 

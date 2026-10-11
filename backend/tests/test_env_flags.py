@@ -59,11 +59,11 @@ def test_chat_chem_tools_flag_registered():
 
 
 def test_list_env_flags_reports_effective_and_default(monkeypatch):
-    monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "true")  # default false
+    monkeypatch.setenv("FORMUMIND_FULLTEXT_ENRICH", "true")  # v2: default true
     get_settings.cache_clear()
     flags = {f["attr"]: f for f in env_flags.list_env_flags()}
     assert flags["fulltext_enrich"]["value"] is True
-    assert flags["fulltext_enrich"]["default"] is False
+    assert flags["fulltext_enrich"]["default"] is True  # v2 P0-1: 默认开启
     assert flags["kb_v2_enabled"]["value"] is True
     assert flags["kb_v2_enabled"]["default"] is True
 

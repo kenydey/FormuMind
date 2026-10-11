@@ -472,10 +472,12 @@ class Settings(BaseSettings):
 
     # 检索结果全文获取（KB P0）：把摘要级命中升级为全文分块并持久化原文。
     # 专利 PDF（USPTO/EPO/Google）+ OA 文献 PDF（OpenAlex/arXiv）+ 网页正文
-    # （trafilatura 优先）。默认关闭以保证测试离线；生产建议开启。
-    fulltext_enrich: bool = False
+    # （trafilatura 优先）。v2 决策①：默认开启，一律全文下载。
+    fulltext_enrich: bool = True
     fulltext_max_docs: int = 8
     fulltext_timeout_s: float = 20.0
+    # v2 P1-9: PDF 内嵌结构图 → vision → SMILES 入库。默认关闭（vision 调用有成本）。
+    pdf_embedded_image_vision: bool = False
 
     # W2-1 (P1-6)：全文 chunk 级 FTS5 索引（页码/章节/字符偏移），默认开启；
     # 索引失败 fail-open，不影响 KB 写入。
@@ -525,7 +527,8 @@ class Settings(BaseSettings):
     # （pymupdf4llm ~350MB/篇、扫描件 OCR ~557MB，本机 4 核取 3 路并发已近上限）。
     # 这两个配额按**项目**累计，到顶后自动入库停止新增（手动单篇入库不受限）。
     kb_project_source_quota: int = 300   # 0 = 不限；每项目资料总数上限
-    kb_project_pdf_quota: int = 50       # 0 = 不限；每项目「走 PDF 下载+解析」篇数上限
+    kb_project_pdf_quota: int = 50       # v2 决策②：不再作为降级门（超限不降级），
+                                        # 仅作成本监控告警阈值；0 = 不告警
     # 相关性闸影子模式（2026-09-11 / W2；Top-5 #1 2026-09-25 默认翻转为真闸）：
     # relevance 实为名次代理（_ranked = 1.0 - 0.02*位置）。False（默认）=
     # 按 topicality 真闸（阈值 kb_ingest_min_relevance）。True = 只记录将拒收率，

@@ -103,6 +103,7 @@ def enrich_manifest_oa(
     # acquisition tracking); _persist_fulltext does the SQLite writes and
     # stays single-threaded in the aggregation loop below.
     timeout = float(getattr(settings, "fulltext_timeout_s", 60) or 60)
+    # v2 决策②：pdf_quota 不再作为降级门，仅监控告警。
     allow_pdf = True
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
@@ -113,11 +114,10 @@ def enrich_manifest_oa(
         except Exception as exc:  # noqa: BLE001
             logger.debug("OA enrich pdf quota lookup failed: %s", exc)
             used = 0
-        allow_pdf = used < pdf_quota
-        if not allow_pdf:
-            logger.info(
-                "OA enrich: pdf quota reached for project %s — dropping PDF tiers",
-                project_id,
+        if used >= pdf_quota:
+            logger.warning(
+                "OA enrich: pdf quota exceeded for project %s (%s/%s) — continuing (v2: monitor-only)",
+                project_id, used, pdf_quota,
             )
 
     jobs: list[tuple[dict[str, Any], Evidence, str]] = []
@@ -142,7 +142,8 @@ def enrich_manifest_oa(
     def _fetch_job(job: tuple[dict[str, Any], Evidence, str]):
         it, ev, kind = job
         try:
-            text = _ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            _hit = _ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            text = _hit.text if _hit else None
             acquisition = _ff._last_acquisition()
         except Exception as exc:  # noqa: BLE001
             logger.debug("OA enrich fetch failed %s: %s", it.get("id"), exc)

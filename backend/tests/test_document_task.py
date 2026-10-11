@@ -22,8 +22,10 @@ def test_patent_routes_to_fetch_and_ingest(monkeypatch):
     calls = {}
 
     def fake_fetch_patent(ev, timeout):
+        from app.services.pdf_downloader import FetchedFulltext
+
         fetched.append((ev.identifier, timeout))
-        return "# US1234567\n\nclaims text " * 30
+        return FetchedFulltext(text="# US1234567\n\nclaims text " * 30)
 
     def fake_ingest_text(text, title, *, persist=True):
         calls["title"] = title

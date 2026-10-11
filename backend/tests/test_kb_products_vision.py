@@ -537,3 +537,22 @@ def test_unresolvable_products_do_not_block_the_batch(stores, monkeypatch):
     assert products.search("known")[0].cas == "64-17-5"
     # The unresolved one stays pending, and is therefore visible in kb_stats.
     assert products.count_needing_structure() == 1
+
+
+# ── v2 P3-14 POC: 公式图 → vision(equation) → LaTeX 入库 ──────────────────────
+
+
+def test_equation_image_renders_latex(monkeypatch):
+    """POC：内嵌公式图经 vision 识别为 equation → LaTeX 进入 markdown。"""
+    from app.services import parsing as parsing_mod
+    from app.services.vision_extract import VisionExtraction, image_markdown
+
+    ext = VisionExtraction(
+        kind="equation",
+        markdown="$$k = A e^{-E_a / (RT)}$$",
+        molecules=[],
+        notes="",
+    )
+    rendered = image_markdown(ext, "p1-fig0.png")
+    assert "$$k = A e^{-E_a / (RT)}$$" in rendered
+    assert "反应方程式" in rendered

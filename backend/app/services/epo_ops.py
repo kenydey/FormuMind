@@ -400,3 +400,109 @@ def parse_search(payload: Any) -> OpsResult:
             total = 0
         break
     return OpsResult(total=max(total, len(hits)), hits=hits)
+
+
+# ── v2 P1-8: EPO OPS 全文下载 ────────────────────────────────────────────────
+
+FULLTEXT_URL_TMPL = BASE_URL + "/rest-services/published-data/publication/docdb/{docdb}/fulltext"
+
+
+def _fulltext_text(xml_bytes: bytes) -> str | None:
+    """OPS fulltext XML → 纯文本（description + claims）。容错：未知结构返回 None。"""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return None
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1].lower()
+
+    parts: list[str] = []
+    for el in root.iter():
+        name = _local(el.tag)
+        if name in {"description", "claims", "abstract"}:
+            text = " ".join(el.itertext())
+            text = re.sub(r"\s+", " ", text).strip()
+            if len(text) > 50:
+                parts.append(f"## {name}\n\n{text}")
+    if not parts:
+        return None
+    return "\n\n".join(parts)
+
+
+def fetch_fulltext(
+    publication: str,
+    *,
+key: str,
+secret: str,
+    timeout: float = 20.0,
+    client: httpx.Client | None = None,
+) -> str | None:
+    """v2 P1-8: EPO OPS 全文下载（description + claims → 文本）。
+
+    ``publication`` 如 ``"EP1000000A1"``。流程：biblio 检索取 docdb（含日期）
+    → ``/fulltext`` 取全文 XML → 抽文本。凭证未配置 / 不可达 / 无全文时
+    返回 None（fail-open），不抛异常。
+
+    注意 OPS 配额：全文请求同样计入配额，调用方应节流。
+    """
+    if not (key and secret):
+        return None
+    try:
+        from .patent_ids import normalize_patent_pub
+    except Exception:
+        return None
+    _office, compact = normalize_patent_pub(publication)
+    if not compact:
+        return None
+
+    def _run(owned: httpx.Client) -> str | None:
+        try:
+            token = access_token(owned, key, secret)
+        except EpoOpsError:
+            return None
+        # biblio 取 docdb（含 publication date，fulltext URL 必需）
+        try:
+            result = _search(owned, f"pn={compact}", key, secret, 1, 1)
+        except EpoOpsError:
+            return None
+        if not result.hits:
+            return None
+        hit = result.hits[0]
+        if not (hit.date and hit.kind):
+            return None
+        docdb = f"{hit.country}.{hit.number}.{hit.kind}.{hit.date}"
+        url = FULLTEXT_URL_TMPL.format(docdb=docdb)
+        try:
+            resp = owned.get(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
+            )
+        except httpx.HTTPError:
+            return None
+        if _token_rejected(resp):
+            try:
+                token = access_token(owned, key, secret, force=True)
+                resp = owned.get(
+                    url,
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
+                )
+            except (httpx.HTTPError, EpoOpsError):
+                return None
+        if resp.status_code != 200:
+            return None
+        text = _fulltext_text(resp.content)
+        if text and len(text.strip()) > 200:
+            return text
+        return None
+
+    try:
+        if client is not None:
+            return _run(client)
+        with make_client(timeout=timeout) as owned:
+            return _run(owned)
+    except Exception:  # noqa: BLE001 - fail-open
+        logger.debug("epo fulltext failed (fail-open)", exc_info=True)
+        return None

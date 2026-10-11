@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.db.database import Base, make_engine, make_session_factory
 from app.domain.schemas import Evidence
 from app.services import fulltext_fetcher as ff
+from app.services.pdf_downloader import FetchedFulltext
 from app.services import kb_ingest
 
 
@@ -74,7 +75,7 @@ def _ev(ident: str, title: str = "", relevance: float = 0.9) -> Evidence:
 
 
 def test_full_state_machine_on_success(stores, monkeypatch):
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     events: list[tuple[str, str]] = []
 
     result = kb_ingest.ingest_evidence_docs(
@@ -90,12 +91,12 @@ def test_full_state_machine_on_success(stores, monkeypatch):
 
 
 def test_origin_url_dedup_skips_without_fetch(stores, monkeypatch):
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     kb_ingest.ingest_evidence_docs([_ev("US1234567")])
 
     calls: list[str] = []
     monkeypatch.setattr(
-        ff, "_fetch_patent_text", lambda ev, t: calls.append(ev.identifier) or LONG_TEXT
+        ff, "_fetch_patent_text", lambda ev, t: calls.append(ev.identifier) or FetchedFulltext(text=LONG_TEXT)
     )
     events: list[str] = []
     result = kb_ingest.ingest_evidence_docs(
@@ -110,7 +111,7 @@ def test_failed_doc_does_not_kill_queue(stores, monkeypatch):
     def fetch(ev, t):
         if ev.identifier == "US1111111":
             raise RuntimeError("boom")
-        return LONG_TEXT
+        return FetchedFulltext(text=LONG_TEXT)
 
     monkeypatch.setattr(ff, "_fetch_patent_text", fetch)
     result = kb_ingest.ingest_evidence_docs([_ev("US1111111"), _ev("US2222222")])
@@ -128,7 +129,7 @@ def test_unfetchable_rows_are_not_queued(stores):
 
 
 def test_max_docs_cap(stores, monkeypatch):
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     evs = [_ev(f"US{i}000000") for i in range(1, 6)]
     result = kb_ingest.ingest_evidence_docs(evs, max_docs=2)
     assert result["total"] == 2
@@ -168,7 +169,7 @@ def _wait_for_terminal(task_id: str, timeout: float = 5.0) -> dict | None:
 
 
 def test_dispatch_returns_task_id_and_runs_in_background(stores, monkeypatch):
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     from app.worker import tasks as worker_tasks
 
     task_id = worker_tasks.dispatch_kb_ingest([_ev("US9999999").model_dump()])
@@ -204,7 +205,7 @@ def test_search_task_attaches_kb_ingest_task_id(stores, monkeypatch):
     from app.services import colbert_store, literature
     from app.worker import tasks as worker_tasks
 
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     monkeypatch.setattr(
         colbert_store, "index_evidence", lambda ev, **kw: len(ev)
     )
@@ -489,7 +490,7 @@ def test_ingest_emits_per_document_and_batch_timing(stores, monkeypatch, caplog)
     """
     import logging
 
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     caplog.set_level(logging.INFO, logger="app.services.ingest_timing")
 
     kb_ingest.ingest_evidence_docs([_ev("US1234567"), _ev("US7654321")])
@@ -550,7 +551,7 @@ def test_indexing_starts_before_the_last_fetch_finishes(stores, monkeypatch):
             _time.sleep(0.6)
         with lock:
             fetch_done[ev.identifier] = _time.perf_counter()
-        return LONG_TEXT
+        return FetchedFulltext(text=LONG_TEXT)
 
     real_index = kb_ingest._index_one
 
@@ -579,7 +580,7 @@ def test_pipelining_preserves_per_document_status(stores, monkeypatch):
     """Out-of-order completion must not scramble which status lands on which doc."""
     def fake_fetch(ev, t):
         # Fail exactly one document; its neighbours must stay unaffected.
-        return None if ev.identifier == "US1234567" else LONG_TEXT
+        return None if ev.identifier == "US1234567" else FetchedFulltext(text=LONG_TEXT)
 
     monkeypatch.setattr(ff, "_fetch_patent_text", fake_fetch)
     monkeypatch.setenv("FORMUMIND_KB_INGEST_WORKERS", "3")

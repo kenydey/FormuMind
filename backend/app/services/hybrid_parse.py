@@ -595,6 +595,17 @@ def parse(content: bytes) -> str | None:
                     "FORMUMIND_PDF_LOCAL_OCR)",
                     blank, len(pages), hint,
                 )
+                # v2 P1-11: 缺页从日志升级为用户可见 —— 静默丢页是质量缺陷。
+                try:
+                    from .parse_notices import note
+
+                    note(
+                        f"本文档 {blank}/{len(pages)} 页无文本层且无可用解析器"
+                        "（MinerU 未启用），这些页的内容未入库；"
+                        "启用 MinerU 或本地 OCR 后重新入库可补全"
+                    )
+                except Exception:
+                    pass
         logger.debug("hybrid: local only (%s)", hint)
         return local_only or None
 

@@ -92,6 +92,21 @@ def stats() -> KBStats:
     return KBStats(**kb_index.kb_stats())
 
 
+@router.get("/acquisition-stats")
+def acquisition_stats(
+    project_id: str | None = Query(default=None, description="按项目过滤，不传则全局"),
+) -> dict:
+    """v2 P0-4: 全文获取质量监控 —— acquisition 分组计数（pdf/html/none…）。
+
+    v2 决策③：不设比例目标，仅用于质量监控（失败分布、解析质量回归）。
+    """
+    from ..db.source_store import get_source_store
+
+    stats = get_source_store().acquisition_stats(project_id=project_id)
+    total = sum(stats.values())
+    return {"project_id": project_id, "total": total, "by_acquisition": stats}
+
+
 @router.get("/quality-ops")
 def quality_ops(
     project_id: str | None = Query(default=None, description="Optional project scope label"),

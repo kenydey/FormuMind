@@ -33,13 +33,69 @@ _ALLOWED_ORIGINS = frozenset(
 )
 
 _NAME_HEADERS = re.compile(
-    r"^(component|ingredient|material|raw\s*material|substance|name|组分|原料|成分|物料)$",
+    r"^(component|ingredient|material|raw\s*material|substance|name|chemical|constituent|precursor|组分|原料|成分|物料)$",
     re.I,
 )
 _AMOUNT_HEADERS = re.compile(
     r"^(wt%|wt\.?%|mass\s*%|weight\s*%|%|parts?|phr|重量份|质量分数|质量%|份)$",
     re.I,
 )
+# v2 P2-13: 表头 embedding 语义匹配 —— 原型短语的向量缓存（懒加载）。
+# 正则白名单优先命中；未知表头回退到语义相似度（阈值 0.55），替代硬编码白名单的脆弱性。
+_NAME_PROTOTYPES = [
+    "component", "ingredient", "material", "raw material", "substance",
+    "chemical name", "constituent", "precursor",
+    "组分", "原料", "成分", "物料", "名称",
+]
+_AMOUNT_PROTOTYPES = [
+    "wt%", "weight percent", "parts by weight", "phr", "concentration",
+    "amount", "dosage", "content",
+    "重量份", "质量分数", "含量", "用量", "配比",
+]
+_HEADER_SEMANTIC_THRESHOLD = 0.55
+_proto_vectors: dict[str, list[list[float]] | None] = {}
+
+
+def _get_proto_vectors(kind: str) -> list[list[float]] | None:
+    """原型短语向量（懒加载 + 缓存）。模型不可用 → None（fail-open）。"""
+    if kind in _proto_vectors:
+        return _proto_vectors[kind]
+    try:
+        from .kb_index import _embed_texts
+
+        protos = _NAME_PROTOTYPES if kind == "name" else _AMOUNT_PROTOTYPES
+        vecs = _embed_texts(protos)
+    except Exception:
+        vecs = None
+    _proto_vectors[kind] = vecs
+    return vecs
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    denom = (sum(x * x for x in a) ** 0.5) * (sum(x * x for x in b) ** 0.5)
+    if denom <= 0:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b)) / denom
+
+
+def _header_semantic_match(header: str, kind: str) -> bool:
+    """表头与原型语义相似度是否达阈值。模型不可用 → False（fail-open）。"""
+    header = (header or "").strip()
+    if not header:
+        return False
+    try:
+        from .kb_index import _embed_texts
+
+        vecs = _embed_texts([header])
+        protos = _get_proto_vectors(kind)
+    except Exception:
+        return False
+    if not vecs or not protos:
+        return False
+    best = max(_cosine(vecs[0], p) for p in protos)
+    return best >= _HEADER_SEMANTIC_THRESHOLD
+
+
 _EXAMPLE_HEAD = re.compile(
     r"(example|embodiment|实施例|实例)\s*([0-9０-９]+|[IVXLC]+)?",
     re.I,
@@ -269,10 +325,17 @@ def _column_map(
                 name_idx = i
             elif re.search(r"component|ingredient|原料|组分|成分", key, re.I):
                 name_idx = i
+            elif _header_semantic_match(key, "name"):
+                # v2 P2-13: 白名单未覆盖 → 语义回退
+                name_idx = i
         if amt_idx is None and _AMOUNT_HEADERS.match(key):
             amt_idx = i
             unit_hint = key
         if amt_idx is None and re.search(r"wt\s*%|重量份|phr|mass\s*%|质量", key, re.I):
+            amt_idx = i
+            unit_hint = key
+        elif amt_idx is None and _header_semantic_match(key, "amount"):
+            # v2 P2-13: 白名单未覆盖 → 语义回退
             amt_idx = i
             unit_hint = key
     if amt_idx is None and len(headers) > 1 and rows:
@@ -413,6 +476,50 @@ def score_embodiment_table(table: dict[str, Any], emb_row: dict[str, Any]) -> fl
     n = len(names)
     score += 0.1 * min(n, 8)
     return score
+
+
+def table_asset_to_dict(asset) -> dict[str, Any]:
+    """v2 P0-7: TableAsset → embodiment 表 dict（与 parse_markdown_tables 同形）。
+
+    合流双表格解析器：解析层已结构化的表格直接消费，不再用文本正则重解析。
+    page_hint 从 asset.page_no 回填（此前恒 None）。
+    """
+    headers = [str(h or "").strip() for h in (getattr(asset, "headers", None) or [])]
+    rows: list[list[str]] = []
+    for r in getattr(asset, "rows", None) or []:
+        if isinstance(r, dict):
+            rows.append([str(r.get(h, "")) for h in headers])
+        else:
+            rows.append([str(c or "").strip() for c in (r or [])])
+    return {
+        "headers": headers,
+        "rows": rows,
+        "label": (getattr(asset, "caption", None) or "Example")[:80],
+        "page_hint": getattr(asset, "page_no", None),
+        "table_id": getattr(asset, "table_id", None),
+        "kind": getattr(asset, "kind", None),
+    }
+
+
+def _tables_from_sidecar(source_id: str) -> list[dict[str, Any]]:
+    """v2 P0-7: 优先消费 table sidecar；无 sidecar 返回 [] 由调用方回退文本解析。"""
+    try:
+        from .table_contract import load_tables
+    except Exception:
+        return []
+    try:
+        assets = load_tables(source_id) or []
+    except Exception:
+        return []
+    out = []
+    for a in assets:
+        try:
+            d = table_asset_to_dict(a)
+            if d["headers"] and d["rows"]:
+                out.append(d)
+        except Exception:
+            continue
+    return out
 
 
 def _collect_source_text(source_id: str) -> tuple[str, list[dict[str, Any]]]:
@@ -588,10 +695,13 @@ def extract_embodiment_draft(
         return {"ok": False, "reason": elig.get("reason") or "ineligible", "draft": None, "eligibility": elig}
 
     text, _chunk_meta = _collect_source_text(source_id)
-    md_tables = parse_markdown_tables(text)
-    html_tables = parse_html_tables(text)
+    # v2 P0-7: 优先消费 TableAsset sidecar（解析器已结构化、带真实页码），
+    # 无 sidecar 时回退到文本表格解析（原行为）。
+    tables = _tables_from_sidecar(source_id)
+    if not tables:
+        tables = parse_markdown_tables(text) + parse_html_tables(text)
     scored: list[tuple[float, dict[str, Any]]] = []
-    for t in md_tables + html_tables:
+    for t in tables:
         emb_row = table_to_ingredients(t)
         if not emb_row:
             continue
@@ -647,7 +757,8 @@ def extract_embodiment_draft(
             amount_source = "placeholder"
 
     if amount_source == "table":
-        text_provenance = "markdown_table" if md_tables else "html_table"
+        # v2 P0-7: sidecar 表带 table_id 标记来源
+        text_provenance = "table_sidecar" if any(t.get("table_id") for t in tables) else "text_table"
     elif amount_source == "prose":
         text_provenance = "prose"
     else:

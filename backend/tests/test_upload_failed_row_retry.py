@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.db.database import Base, make_engine, make_session_factory
 from app.domain.schemas import Evidence
 from app.services import fulltext_fetcher as ff
+from app.services.pdf_downloader import FetchedFulltext
 from app.services import ingestion, kb_ingest
 
 LONG_TEXT = "# 防腐蚀专利\n\n" + "环氧树脂与磷酸锌协同防腐蚀机理研究。" * 60
@@ -186,7 +187,7 @@ def test_ingest_single_retries_a_failed_row_instead_of_reporting_skipped(stores,
 
     origin = canonical_origin_url("US7777777", url=None)
     failed_id = _fail(src, origin, "previous attempt failed")
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
 
     result = kb_ingest.ingest_single_evidence(_ev("US7777777"))
 
@@ -196,7 +197,7 @@ def test_ingest_single_retries_a_failed_row_instead_of_reporting_skipped(stores,
 
 
 def test_ingest_single_still_skips_an_indexed_row(stores, monkeypatch):
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     first = kb_ingest.ingest_single_evidence(_ev("US8888888"))
     assert first["status"] == "indexed"
     again = kb_ingest.ingest_single_evidence(_ev("US8888888"))

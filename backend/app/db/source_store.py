@@ -83,6 +83,23 @@ class SourceStore:
                 q = q.filter(SourceDocument.acquisition == acquisition)
             return q.count()
 
+    def acquisition_stats(self, project_id: str | None = None) -> dict[str, int]:
+        """v2 P0-4: 全文获取质量监控 —— 按 acquisition 分组计数。
+
+        v2 决策③：不设比例目标，此统计用于质量监控（失败分布、解析质量回归），
+        不设 KPI 线。acquisition 取值：pdf / html / none / text 等。
+        """
+        from sqlalchemy import func
+
+        with self._session_factory() as session:
+            q = session.query(
+                SourceDocument.acquisition, func.count(SourceDocument.id)
+            )
+            if project_id:
+                q = q.filter(SourceDocument.project_id == project_id)
+            q = q.group_by(SourceDocument.acquisition)
+            return {(k or "none"): int(v) for k, v in q.all()}
+
     def set_archived(self, source_id: str, archived: bool = True) -> bool:
         """Soft-archive or restore a source. Returns False if the row is missing."""
         with commit_session(self._session_factory) as session:

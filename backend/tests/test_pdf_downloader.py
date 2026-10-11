@@ -8,6 +8,7 @@ require those optional libraries.
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from app.domain.schemas import Evidence
 from app.services import pdf_downloader as pd
@@ -189,7 +190,7 @@ def test_f2_pdf_used_when_html_has_no_table(monkeypatch):
         pd, "_pdf_url_from_landing", lambda html: "https://patentimages.storage.googleapis.com/x.pdf"
     )
     monkeypatch.setattr(pd, "fetch_pdf", lambda *a, **k: b"%PDF-fake")
-    monkeypatch.setattr(pd, "_extract_text", lambda content: pdf_md)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(pdf_md), tables=[]))
 
     text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
     assert text == pdf_md
@@ -252,7 +253,7 @@ def test_fetch_patent_text_prefers_html_and_makes_one_request(monkeypatch):
     monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
     monkeypatch.setattr(pd, "fetch_pdf", lambda url, *a, **kw: downloads.append(url) or b"X")
     # Short / empty extract → F2 discards PDF and keeps HTML.
-    monkeypatch.setattr(pd, "_extract_text", lambda _: "short")
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=("short"), tables=[]))
 
     text = pd.fetch_patent_text("CN102345678A", prefer_html=True)
     assert text and "## Description" in text
@@ -285,7 +286,7 @@ containing zinc phosphate for corrosion protection of carbon steel substrates.</
 def test_fetch_patent_text_uses_pdf_when_html_not_preferred(monkeypatch):
     monkeypatch.setattr(pd, "fetch_patent_landing", lambda *a, **kw: _LANDING_HTML)
     monkeypatch.setattr(pd, "fetch_pdf", lambda *a, **kw: b"%PDF-1.4 fake")
-    monkeypatch.setattr(pd, "_extract_text", lambda _: "PARSED PDF BODY " * 30)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=("PARSED PDF BODY " * 30), tables=[]))
 
     text = pd.fetch_patent_text("CN102345678A", prefer_html=False)
     assert text is not None
@@ -339,7 +340,7 @@ def test_fetch_patent_landing_returns_none_on_non_200(monkeypatch):
 
 
 def test_pdf_to_evidence_empty_when_no_text(monkeypatch):
-    monkeypatch.setattr(pd, "_extract_text", lambda _: "")
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(""), tables=[]))
     result = pd.pdf_to_evidence(b"fake", "USPTO", "US123", "Test", max_chunks=3)
     assert result == []
 
@@ -347,7 +348,7 @@ def test_pdf_to_evidence_empty_when_no_text(monkeypatch):
 def test_pdf_to_evidence_chunks_text(monkeypatch):
     long_para = "Zinc phosphate epoxy primer with waterborne resin system for corrosion protection on carbon steel substrates."
     text = "\n\n".join([f"{long_para} Variant {i}." for i in range(5)])
-    monkeypatch.setattr(pd, "_extract_text", lambda _: text)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(text), tables=[]))
 
     result = pd.pdf_to_evidence(
         b"fake", "USPTO", "US9982145B2", "Zinc Phosphate Primer", max_chunks=3
@@ -366,7 +367,7 @@ def test_pdf_to_evidence_skips_short_paragraphs(monkeypatch):
     short = "Short."
     long_para = "A" * 120  # >= 100 chars
     text = f"{short}\n\n{long_para}\n\n{short}"
-    monkeypatch.setattr(pd, "_extract_text", lambda _: text)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(text), tables=[]))
 
     result = pd.pdf_to_evidence(b"fake", "USPTO", "US1", "T", max_chunks=5)
     assert len(result) == 1
@@ -395,7 +396,7 @@ def test_enrich_replaces_with_chunks(monkeypatch):
     fake_text = "\n\n".join([f"{long_para} Para {i}." for i in range(4)])
 
     monkeypatch.setattr(pd, "fetch_patent_pdf", lambda *a, **kw: b"FAKE_PDF")
-    monkeypatch.setattr(pd, "_extract_text", lambda _: fake_text)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(fake_text), tables=[]))
 
     ev = [_ev("US9982145B2")]
     result = pd.enrich_with_fulltext(ev, max_pdfs=1)
@@ -411,7 +412,7 @@ def test_enrich_respects_max_pdfs(monkeypatch):
     fake_text = "\n\n".join([f"{long_para} Row {i}." for i in range(3)])
 
     monkeypatch.setattr(pd, "fetch_patent_pdf", lambda *a, **kw: b"FAKE")
-    monkeypatch.setattr(pd, "_extract_text", lambda _: fake_text)
+    monkeypatch.setattr(pd, "_parse_pdf_bytes", lambda content: SimpleNamespace(ok=True, markdown=(fake_text), tables=[]))
 
     ev = [_ev("US1111111"), _ev("US2222222"), _ev("US3333333")]
     result = pd.enrich_with_fulltext(ev, max_pdfs=1)

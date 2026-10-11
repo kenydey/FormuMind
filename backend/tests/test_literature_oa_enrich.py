@@ -52,7 +52,8 @@ def test_oa_enrich_success_unfreezes(tmp_path, monkeypatch):
     oe.lm.save_manifest(man)
 
     with patch.object(oe, "classify", return_value="literature"), patch(
-        "app.services.fulltext_fetcher._dispatch_fetch", return_value="FULL TEXT"
+        "app.services.fulltext_fetcher._dispatch_fetch",
+        return_value=oe._ff.FetchedFulltext(text="FULL TEXT"),
     ) as mock_fetch, patch(
         "app.services.fulltext_fetcher._persist_fulltext", return_value="src-1"
     ) as mock_persist:

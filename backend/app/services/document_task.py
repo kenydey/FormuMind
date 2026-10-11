@@ -72,12 +72,14 @@ def resolve_document(doc_type: str, identifier: str, *, timeout: float | None = 
         if doc_type == "patent":
             from .fulltext_fetcher import _fetch_patent_text
 
-            text = _fetch_patent_text(_evidence_like(identifier.upper()), timeout=timeout)
+            _hit = _fetch_patent_text(_evidence_like(identifier.upper()), timeout=timeout)
+            text = _hit.text if _hit else None
             tier = "dom"
         else:  # paper
             from .fulltext_fetcher import _fetch_literature_text
 
-            text = _fetch_literature_text(_evidence_like(identifier), timeout=timeout)
+            _hit = _fetch_literature_text(_evidence_like(identifier), timeout=timeout)
+            text = _hit.text if _hit else None
             tier = "full"
 
         if not text or not text.strip():

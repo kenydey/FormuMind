@@ -1,0 +1,908 @@
+{
+  "_meta": {
+    "note": "表格来自公开涂装专利实施例的典型结构（脱敏重构）；预期值为人工标注",
+    "purpose": "v2 P0-8: 专利实施例表提取 golden 集 —— 组分名检出率 / wt% 归一化误差的回归基线",
+    "tolerance_wt_pct": 0.5,
+    "version": 1
+  },
+  "cases": [
+    {
+      "expected": {
+        "ingredients": [
+          "Epoxy resin E-44",
+          "Polyamide hardener",
+          "Zinc phosphate",
+          "Defoamer"
+        ],
+        "wt_pct": [
+          60.0,
+          25.0,
+          10.0,
+          5.0
+        ]
+      },
+      "id": "EMB-001",
+      "label": "Example 1",
+      "patent": "CN104789083B-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Epoxy resin E-44",
+            "60.0"
+          ],
+          [
+            "Polyamide hardener",
+            "25.0"
+          ],
+          [
+            "Zinc phosphate",
+            "10.0"
+          ],
+          [
+            "Defoamer",
+            "5.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "环氧树脂",
+          "固化剂",
+          "磷酸锌",
+          "钛白粉",
+          "助剂"
+        ],
+        "wt_pct": [
+          50.0,
+          20.0,
+          15.0,
+          10.0,
+          5.0
+        ]
+      },
+      "id": "EMB-002",
+      "label": "Example 2",
+      "patent": "CN104789083B-like",
+      "table": {
+        "headers": [
+          "原料",
+          "重量份"
+        ],
+        "rows": [
+          [
+            "环氧树脂",
+            "50"
+          ],
+          [
+            "固化剂",
+            "20"
+          ],
+          [
+            "磷酸锌",
+            "15"
+          ],
+          [
+            "钛白粉",
+            "10"
+          ],
+          [
+            "助剂",
+            "5"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Acrylic polyol",
+          "HDI trimer",
+          "Barium sulfate",
+          "Wetting agent"
+        ],
+        "wt_pct": [
+          64.1,
+          22.44,
+          12.82,
+          0.96
+        ]
+      },
+      "id": "EMB-003",
+      "label": "Example 3",
+      "patent": "US-primer-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "Parts by weight"
+        ],
+        "rows": [
+          [
+            "Acrylic polyol",
+            "100"
+          ],
+          [
+            "HDI trimer",
+            "35"
+          ],
+          [
+            "Barium sulfate",
+            "20"
+          ],
+          [
+            "Wetting agent",
+            "1.5"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Hexafluorozirconic acid",
+          "Copper nitrate",
+          "Surfactant"
+        ],
+        "wt_pct": [
+          2.0,
+          0.5,
+          0.2
+        ],
+        "note": "g/L 为浓度单位：不归一，原样保留+人审警告（化学正确）"
+      },
+      "id": "EMB-004",
+      "label": "Example 1",
+      "patent": "EP-conversion-like",
+      "table": {
+        "headers": [
+          "Component",
+          "g/L"
+        ],
+        "rows": [
+          [
+            "Hexafluorozirconic acid",
+            "2.0"
+          ],
+          [
+            "Copper nitrate",
+            "0.5"
+          ],
+          [
+            "Surfactant",
+            "0.2"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "聚酯树脂",
+          "TGIC",
+          "硫酸钡",
+          "流平剂",
+          "炭黑"
+        ],
+        "wt_pct": [
+          55.0,
+          5.0,
+          25.0,
+          1.0,
+          14.0
+        ]
+      },
+      "id": "EMB-005",
+      "label": "实施例1",
+      "patent": "CN-powder-like",
+      "table": {
+        "headers": [
+          "组分",
+          "质量百分比/%"
+        ],
+        "rows": [
+          [
+            "聚酯树脂",
+            "55"
+          ],
+          [
+            "TGIC",
+            "5"
+          ],
+          [
+            "硫酸钡",
+            "25"
+          ],
+          [
+            "流平剂",
+            "1"
+          ],
+          [
+            "炭黑",
+            "14"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Epoxy-amine adduct",
+          "Blocked isocyanate",
+          "Kaolin clay",
+          "Carbon black",
+          "Deionized water"
+        ],
+        "wt_pct": [
+          42.5,
+          18.3,
+          12.0,
+          2.2,
+          25.0
+        ]
+      },
+      "id": "EMB-006",
+      "label": "Example 5",
+      "patent": "US-electrocoat-like",
+      "table": {
+        "headers": [
+          "Material",
+          "wt %"
+        ],
+        "rows": [
+          [
+            "Epoxy-amine adduct",
+            "42.5"
+          ],
+          [
+            "Blocked isocyanate",
+            "18.3"
+          ],
+          [
+            "Kaolin clay",
+            "12.0"
+          ],
+          [
+            "Carbon black",
+            "2.2"
+          ],
+          [
+            "Deionized water",
+            "25.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "水性丙烯酸乳液",
+          "成膜助剂",
+          "防闪锈剂",
+          "磷酸锌",
+          "去离子水"
+        ],
+        "wt_pct": [
+          48.0,
+          4.0,
+          0.8,
+          8.0,
+          39.2
+        ]
+      },
+      "id": "EMB-007",
+      "label": "实施例3",
+      "patent": "CN-waterborne-like",
+      "table": {
+        "headers": [
+          "成分",
+          "含量(重量%)"
+        ],
+        "rows": [
+          [
+            "水性丙烯酸乳液",
+            "48.0"
+          ],
+          [
+            "成膜助剂",
+            "4.0"
+          ],
+          [
+            "防闪锈剂",
+            "0.8"
+          ],
+          [
+            "磷酸锌",
+            "8.0"
+          ],
+          [
+            "去离子水",
+            "39.2"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Zirconium",
+          "Silane",
+          "Fluoride"
+        ],
+        "wt_pct": [
+          55.56,
+          29.63,
+          14.81
+        ]
+      },
+      "id": "EMB-008",
+      "label": "Example 2",
+      "patent": "US-pretreat-like",
+      "table": {
+        "headers": [
+          "Substance",
+          "Concentration (ppm)"
+        ],
+        "rows": [
+          [
+            "Zirconium",
+            "150"
+          ],
+          [
+            "Silane",
+            "80"
+          ],
+          [
+            "Fluoride",
+            "40"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "环氧富锌底漆基料",
+          "锌粉",
+          "分散剂",
+          "防沉剂"
+        ],
+        "wt_pct": [
+          70.0,
+          25.0,
+          2.0,
+          3.0
+        ]
+      },
+      "id": "EMB-009",
+      "label": "实施例2",
+      "patent": "CN-anticorrosion-like",
+      "table": {
+        "headers": [
+          "组分",
+          "份数"
+        ],
+        "rows": [
+          [
+            "环氧富锌底漆基料",
+            "70"
+          ],
+          [
+            "锌粉",
+            "25"
+          ],
+          [
+            "分散剂",
+            "2"
+          ],
+          [
+            "防沉剂",
+            "3"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Hydroxyl acrylic resin",
+          "Melamine resin",
+          "Titanium dioxide",
+          "Leveling agent",
+          "Xylene"
+        ],
+        "wt_pct": [
+          52.0,
+          12.0,
+          28.0,
+          0.6,
+          7.4
+        ]
+      },
+      "id": "EMB-010",
+      "label": "Example 4",
+      "patent": "EP-topcoat-like",
+      "table": {
+        "headers": [
+          "Raw material",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Hydroxyl acrylic resin",
+            "52.0"
+          ],
+          [
+            "Melamine resin",
+            "12.0"
+          ],
+          [
+            "Titanium dioxide",
+            "28.0"
+          ],
+          [
+            "Leveling agent",
+            "0.6"
+          ],
+          [
+            "Xylene",
+            "7.4"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Zinc phosphate",
+          "Nickel nitrate",
+          "Sodium nitrite"
+        ],
+        "wt_pct": [
+          3.2,
+          0.4,
+          0.6
+        ],
+        "note": "oz/gal 未归一：按 wt% 原样，expect 人审警告"
+      },
+      "id": "EMB-011",
+      "label": "Example 1",
+      "patent": "US-phosphate-like",
+      "table": {
+        "headers": [
+          "Chemical",
+          "oz/gal"
+        ],
+        "rows": [
+          [
+            "Zinc phosphate",
+            "3.2"
+          ],
+          [
+            "Nickel nitrate",
+            "0.4"
+          ],
+          [
+            "Sodium nitrite",
+            "0.6"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "硅烷偶联剂",
+          "纳米二氧化硅",
+          "乙醇",
+          "水"
+        ],
+        "wt_pct": [
+          3.0,
+          6.0,
+          45.0,
+          46.0
+        ]
+      },
+      "id": "EMB-012",
+      "label": "实施例4",
+      "patent": "CN-sealer-like",
+      "table": {
+        "headers": [
+          "原料名称",
+          "重量百分比"
+        ],
+        "rows": [
+          [
+            "硅烷偶联剂",
+            "3.0"
+          ],
+          [
+            "纳米二氧化硅",
+            "6.0"
+          ],
+          [
+            "乙醇",
+            "45.0"
+          ],
+          [
+            "水",
+            "46.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Urethane acrylate oligomer",
+          "HDDA monomer",
+          "Photoinitiator 184",
+          "Matting agent",
+          "Defoamer"
+        ],
+        "wt_pct": [
+          55.0,
+          30.0,
+          5.0,
+          6.0,
+          4.0
+        ]
+      },
+      "id": "EMB-013",
+      "label": "Example 6",
+      "patent": "US-uvcure-like",
+      "table": {
+        "headers": [
+          "Component",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Urethane acrylate oligomer",
+            "55.0"
+          ],
+          [
+            "HDDA monomer",
+            "30.0"
+          ],
+          [
+            "Photoinitiator 184",
+            "5.0"
+          ],
+          [
+            "Matting agent",
+            "6.0"
+          ],
+          [
+            "Defoamer",
+            "4.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "改性环氧树脂",
+          "封闭型异氰酸酯",
+          "高岭土",
+          "乙二醇单丁醚",
+          "去离子水"
+        ],
+        "wt_pct": [
+          38.0,
+          15.0,
+          10.0,
+          5.0,
+          32.0
+        ]
+      },
+      "id": "EMB-014",
+      "label": "实施例5",
+      "patent": "CN-cathodic-like",
+      "table": {
+        "headers": [
+          "组分",
+          "质量份"
+        ],
+        "rows": [
+          [
+            "改性环氧树脂",
+            "38"
+          ],
+          [
+            "封闭型异氰酸酯",
+            "15"
+          ],
+          [
+            "高岭土",
+            "10"
+          ],
+          [
+            "乙二醇单丁醚",
+            "5"
+          ],
+          [
+            "去离子水",
+            "32"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Zinc flake",
+          "Aluminum flake",
+          "Silicate binder",
+          "Glycol ether",
+          "Water"
+        ],
+        "wt_pct": [
+          28.0,
+          4.0,
+          22.0,
+          18.0,
+          28.0
+        ]
+      },
+      "id": "EMB-015",
+      "label": "Example 2",
+      "patent": "EP-zincflake-like",
+      "table": {
+        "headers": [
+          "Ingredient",
+          "% by weight"
+        ],
+        "rows": [
+          [
+            "Zinc flake",
+            "28.0"
+          ],
+          [
+            "Aluminum flake",
+            "4.0"
+          ],
+          [
+            "Silicate binder",
+            "22.0"
+          ],
+          [
+            "Glycol ether",
+            "18.0"
+          ],
+          [
+            "Water",
+            "28.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Acrylic latex",
+          "Ferric fluoride",
+          "Surfactant",
+          "Water"
+        ],
+        "wt_pct": [
+          18.5,
+          1.2,
+          0.4,
+          79.9
+        ]
+      },
+      "id": "EMB-016",
+      "label": "Example 3",
+      "patent": "US-autodep-like",
+      "table": {
+        "headers": [
+          "Constituent",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "Acrylic latex",
+            "18.5"
+          ],
+          [
+            "Ferric fluoride",
+            "1.2"
+          ],
+          [
+            "Surfactant",
+            "0.4"
+          ],
+          [
+            "Water",
+            "79.9"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "有机硅树脂",
+          "钛白粉",
+          "云母粉",
+          "二甲苯",
+          "催干剂"
+        ],
+        "wt_pct": [
+          40.0,
+          20.0,
+          15.0,
+          20.0,
+          5.0
+        ]
+      },
+      "id": "EMB-017",
+      "label": "实施例1",
+      "patent": "CN-silicone-like",
+      "table": {
+        "headers": [
+          "成分",
+          "wt%"
+        ],
+        "rows": [
+          [
+            "有机硅树脂",
+            "40.0"
+          ],
+          [
+            "钛白粉",
+            "20.0"
+          ],
+          [
+            "云母粉",
+            "15.0"
+          ],
+          [
+            "二甲苯",
+            "20.0"
+          ],
+          [
+            "催干剂",
+            "5.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "Polyvinyl butyral",
+          "Zinc tetroxychromate",
+          "Phosphoric acid",
+          "Isopropanol"
+        ],
+        "wt_pct": [
+          12.0,
+          18.0,
+          8.0,
+          62.0
+        ]
+      },
+      "id": "EMB-018",
+      "label": "Example 7",
+      "patent": "US-washprimer-like",
+      "table": {
+        "headers": [
+          "Material",
+          "parts"
+        ],
+        "rows": [
+          [
+            "Polyvinyl butyral",
+            "12"
+          ],
+          [
+            "Zinc tetroxychromate",
+            "18"
+          ],
+          [
+            "Phosphoric acid",
+            "8"
+          ],
+          [
+            "Isopropanol",
+            "62"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "水性环氧乳液",
+          "石墨烯浆料",
+          "磷酸锌",
+          "分散剂",
+          "去离子水"
+        ],
+        "wt_pct": [
+          45.5,
+          3.5,
+          7.0,
+          1.0,
+          43.0
+        ]
+      },
+      "id": "EMB-019",
+      "label": "实施例6",
+      "patent": "CN-graphene-like",
+      "table": {
+        "headers": [
+          "组分",
+          "重量%"
+        ],
+        "rows": [
+          [
+            "水性环氧乳液",
+            "45.5"
+          ],
+          [
+            "石墨烯浆料",
+            "3.5"
+          ],
+          [
+            "磷酸锌",
+            "7.0"
+          ],
+          [
+            "分散剂",
+            "1.0"
+          ],
+          [
+            "去离子水",
+            "43.0"
+          ]
+        ]
+      }
+    },
+    {
+      "expected": {
+        "ingredients": [
+          "TEOS",
+          "GPTMS",
+          "Zirconium propoxide"
+        ],
+        "wt_pct": [
+          70.0,
+          25.0,
+          5.0
+        ]
+      },
+      "id": "EMB-020",
+      "label": "Example 1",
+      "patent": "EP-solgel-like",
+      "table": {
+        "headers": [
+          "Precursor",
+          "mol%"
+        ],
+        "rows": [
+          [
+            "TEOS",
+            "70"
+          ],
+          [
+            "GPTMS",
+            "25"
+          ],
+          [
+            "Zirconium propoxide",
+            "5"
+          ]
+        ]
+      }
+    }
+  ]
+}

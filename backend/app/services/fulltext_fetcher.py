@@ -31,6 +31,7 @@ from ..domain.schemas import Evidence
 from . import ingest_timing as _timing
 from .errors import degrade_return
 from .http_safe import make_client, ssrf_safe_client
+from .pdf_downloader import FetchedFulltext
 
 logger = logging.getLogger(__name__)
 
@@ -127,22 +128,26 @@ def classify(ev: Evidence) -> str | None:
 # ── fetchers (text or None) ──────────────────────────────────────────────────
 
 
-def _fetch_patent_text(ev: Evidence, timeout: float) -> str | None:
+def _fetch_patent_text(ev: Evidence, timeout: float) -> FetchedFulltext | None:
     """Full text via the Google Patents landing page (HTML body or its PDF).
 
     See ``pdf_downloader`` for why this is one lookup and not three direct-URL
     guesses: all three of those endpoints are dead, so every patent used to
     burn two timeouts and yield nothing.
+
+    v2 P0-6: returns ``FetchedFulltext`` (text + PDF bytes + tables).
     """
     from .patent_ids import normalize_patent_pub
-    from .pdf_downloader import fetch_patent_text
+    from .pdf_downloader import fetch_patent_fulltext
 
     _office, compact = normalize_patent_pub(ev.identifier)
     if not compact:
         _office, compact = normalize_patent_pub(getattr(ev, "url", None) or "")
     pub = compact or (ev.identifier or "").strip().upper()
-    text = fetch_patent_text(pub, timeout=timeout)
-    return text if text and len(text.strip()) > 200 else None
+    hit = fetch_patent_fulltext(pub, timeout=timeout)
+    if hit and len(hit.text.strip()) > 200:
+        return hit
+    return None
 
 
 def _unpaywall_locations(doi: str, timeout: float) -> tuple[list[str], list[str]]:
@@ -355,7 +360,9 @@ def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | No
     return m.group(1) if m else None
 
 
-def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
+def _openalex_content_text(
+    ev: Evidence, timeout: float, *, allow_pdf: bool = True
+) -> FetchedFulltext | None:
     """Full text from the OpenAlex content archive. TEI XML first, then PDF.
 
     Returns None (never raises) when the tier is off, unkeyed, or the work has
@@ -363,6 +370,9 @@ def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
 
     ``allow_pdf=False`` skips the PDF tier (per-project PDF quota): the TEI tier
     is free of parse/OCR cost, so it stays available at any quota.
+
+    v2 P0-6: returns ``FetchedFulltext`` — the PDF tier keeps raw bytes +
+    parsed tables for the ingest sidecar instead of dropping them.
     """
     settings = get_settings()
     api_key = getattr(settings, "openalex_api_key", None)
@@ -426,18 +436,31 @@ def _openalex_content_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
         body = _maybe_gunzip(r.content)
         if ext == "grobid-xml":
             text = _tei_to_text(body)
+            pdf_bytes: bytes | None = None
+            tables: list | None = None
         else:
-            try:
-                from .pdf_downloader import _extract_text
+            # v2 P0-6: 完整解析一次，字节+表格保留给入库 sidecar。
+            from .pdf_downloader import _parse_pdf_bytes
 
-                text = _extract_text(body)
-            except Exception as exc:
-                degrade_return(logger, exc, f"OpenAlex content PDF extract failed: {work_id}", None)
-                continue
+            parsed = _parse_pdf_bytes(body)
+            if parsed is not None:
+                text = parsed.markdown
+                pdf_bytes = body
+                tables = list(getattr(parsed, "tables", None) or []) or None
+            else:
+                try:
+                    from .pdf_downloader import _extract_text
+
+                    text = _extract_text(body)
+                except Exception as exc:
+                    degrade_return(logger, exc, f"OpenAlex content PDF extract failed: {work_id}", None)
+                    continue
+                pdf_bytes = body
+                tables = None
         if text and len(text.strip()) > 200:
             logger.info("OpenAlex content hit (%s): %s", label, work_id)
             _set_acquisition(acq)
-            return text
+            return FetchedFulltext(text=text, pdf_bytes=pdf_bytes, tables=tables)
     return None
 
 
@@ -459,7 +482,9 @@ def _last_acquisition() -> str:
 _ACQ_PDF = "pdf"
 
 
-def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
+def _fetch_literature_text(
+    ev: Evidence, timeout: float, *, allow_pdf: bool = True
+) -> FetchedFulltext | None:
     """Full text for a DOI/arXiv row.
 
     Order (2026-09-11): OpenAlex content archive (TEI XML → PDF, publisher-403
@@ -471,6 +496,8 @@ def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
     path, which is the memory-bound one, so honouring it by skipping *those
     tiers* is the point — refusing to store the result afterwards would pay the
     cost and cap nothing.
+
+    v2 P0-6: returns ``FetchedFulltext`` (text + PDF bytes + tables).
     """
 
     # Tier 0: OpenAlex-hosted copy. Cheapest when available — TEI XML skips the
@@ -484,7 +511,7 @@ def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
         pdf_cands = []
     if not pdf_cands and not landing_cands:
         raise FetchError("无 OA 版本")
-    from .pdf_downloader import _extract_text, fetch_pdf_ex
+    from .pdf_downloader import _parse_pdf_bytes, _raw_pdf_stream_text, fetch_pdf_ex
 
     last_reason = "no candidate"
     for pdf_url in pdf_cands:
@@ -494,12 +521,15 @@ def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
             logger.info("OA pdf candidate failed (%s): %s", reason, pdf_url[:90])
             continue
         try:
-            text = _extract_text(pdf)
+            # v2 P0-6: 完整解析一次，文本+字节+表格全保留。
+            parsed = _parse_pdf_bytes(pdf)
+            text = parsed.markdown if parsed is not None else _raw_pdf_stream_text(pdf)
+            tables = list(getattr(parsed, "tables", None) or []) or None
         except Exception as exc:
             return degrade_return(logger, exc, f"pdf extract failed: {pdf_url}", None)
         if text and len(text.strip()) > 200:
             _set_acquisition(_ACQ_PDF)
-            return text
+            return FetchedFulltext(text=text, pdf_bytes=pdf, tables=tables)
         last_reason = "extract-empty"
     # PDF 候选全败 → HTML 兜底(landing/PMC 页, 2026-09-05 补足)
     for landing in landing_cands:
@@ -507,7 +537,7 @@ def _fetch_literature_text(ev: Evidence, timeout: float, *, allow_pdf: bool = Tr
         if html_text and len(html_text.strip()) > 200:
             logger.info("OA html fallback ok: %s", landing[:90])
             _set_acquisition("html")
-            return html_text
+            return FetchedFulltext(text=html_text)
     raise FetchError(f"OA 全文获取失败: {last_reason}")
 
 
@@ -607,12 +637,17 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
     return text if text and len(text.strip()) > 200 else None
 
 
-def _dispatch_fetch(kind: str, ev: Evidence, timeout: float, *, allow_pdf: bool = True) -> str | None:
-    """Resolve the fetcher at call time (keeps the registry monkeypatchable)."""
+def _dispatch_fetch(
+    kind: str, ev: Evidence, timeout: float, *, allow_pdf: bool = True
+) -> FetchedFulltext | None:
+    """Resolve the fetcher at call time (keeps the registry monkeypatchable).
+
+    v2 P0-6: returns ``FetchedFulltext`` (text + PDF bytes + tables).
+    """
     _ACQ.path = "text"  # reset per dispatch: the fetcher downgrades it if it used a PDF
     if kind == "patent":
-        text = _fetch_patent_text(ev, timeout)
-        if text:
+        hit = _fetch_patent_text(ev, timeout)
+        if hit:
             # Approximation, documented on purpose: `fetch_patent_text` picks
             # HTML vs PDF internally and does not report which, so attribute by
             # the configured preference. The default (`patent_prefer_html=True`)
@@ -623,14 +658,14 @@ def _dispatch_fetch(kind: str, ev: Evidence, timeout: float, *, allow_pdf: bool 
             # and tests for no functional gain.
             prefer_html = bool(getattr(get_settings(), "patent_prefer_html", True))
             _set_acquisition("html" if prefer_html else _ACQ_PDF)
-        return text
+        return hit
     if kind == "literature":
         return _fetch_literature_text(ev, timeout, allow_pdf=allow_pdf)
     if kind == "web":
         text = _fetch_web_text(ev, timeout)
         if text:
             _set_acquisition("html")
-        return text
+            return FetchedFulltext(text=text)
     return None
 
 
@@ -656,7 +691,12 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
     chunks = [c for c in chunks if len(c.text.strip()) > 30][: settings.ingest_max_chunks]
     out: list[Evidence] = []
     for i, chunk in enumerate(chunks):
-        title = ev.title if i == 0 else f"{ev.title} (p.{i + 1})"
+        # v2 P0-5: 页码诚实化 —— 用 marker 解析的真实 page_no；无真实页码时
+        # 不写页码（此前 f"(p.{i+1})" 用 chunk 序号冒充页码，已删除）。
+        page = getattr(chunk, "page_no", None)
+        title = ev.title
+        if page is not None:
+            title = f"{title} (p.{page})"
         if chunk.heading_path:
             title = f"{title} · {chunk.heading_path}"
         out.append(
@@ -666,9 +706,48 @@ def _text_to_chunks(text: str, ev: Evidence) -> list[Evidence]:
                 title=title,
                 snippet=chunk_snippet(chunk.text),
                 relevance=max(0.2, round(ev.relevance - i * 0.01, 3)),
+                page=int(page) if page is not None else None,
             )
         )
     return out
+
+
+def _persist_pdf_sidecars(
+    source_id: str,
+    ev: Evidence,
+    pdf_bytes: bytes | None,
+    tables: list | None,
+) -> None:
+    """v2 P0-6: 全文下载 PDF 的字节 + 表格 sidecar 落盘（fail-open）。
+
+    - PDF 原始字节 → backend/data/source_files/{source_id}.pdf
+      （复用 PageIndex 借鉴已建的下载端点 GET /api/documents/{id}/file）。
+    - 解析出的表格 → table sidecar（与本地上传路径同键）。
+    任一失败只记日志，不影响文本入库。
+    """
+    if pdf_bytes:
+        try:
+            import tempfile
+            from pathlib import Path
+
+            from .source_files import persist_source_file
+
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(pdf_bytes)
+                tmp_path = Path(tmp.name)
+            try:
+                persist_source_file(source_id, tmp_path, f"{source_id}.pdf")
+            finally:
+                tmp_path.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("pdf source file persist failed (fail-open)")
+    if tables:
+        try:
+            from .parsing import persist_table_sidecar
+
+            persist_table_sidecar(source_id, tables)
+        except Exception:  # noqa: BLE001
+            logger.warning("table sidecar persist failed (fail-open)")
 
 
 def _is_db_locked(exc: Exception) -> bool:
@@ -694,6 +773,8 @@ def _persist_fulltext(
     *,
     project_id: str | None = None,
     acquisition: str | None = None,
+    pdf_bytes: bytes | None = None,
+    tables: list | None = None,
 ) -> str | None:
     """Store the raw full text as a SourceDocument (dedup by content hash).
 
@@ -702,6 +783,10 @@ def _persist_fulltext(
     processes can exhaust the 60s busy_timeout. A fresh session + content-hash
     dedup make the retry idempotent — a create that already landed is found by
     find_by_hash on the next attempt instead of being duplicated.
+
+    v2 P0-6: ``pdf_bytes``/``tables`` — PDF tier 的原始字节与解析表格。
+    落盘后：PDF 存 source_files/（下载端点可取），表格走 table sidecar，
+    与本地上传路径同级。全部 fail-open，失败不影响文本入库。
     """
     import time
 
@@ -752,6 +837,11 @@ def _persist_fulltext(
                         )
                     except Exception:  # noqa: BLE001
                         logger.warning("mark revive failed row failed (fail-open)")
+                # v2 P0-6: 复活行同样补 sidecar（fail-open）。
+                try:
+                    _persist_pdf_sidecars(failed_row.id, ev, pdf_bytes, tables)
+                except Exception:  # noqa: BLE001
+                    logger.warning("pdf sidecar persist failed on revive (fail-open)")
                 return failed_row.id
             source_id = store.create(
                 filename=ev.identifier[:500],
@@ -777,6 +867,13 @@ def _persist_fulltext(
                     )
                 except Exception:  # noqa: BLE001
                     logger.warning("mark indexed-failed row failed (fail-open)")
+            # v2 P0-6: PDF 字节 + 表格 sidecar —— 与本地上传路径同级。
+            # 双层 fail-open：函数内部已 catch，这里再兜一层，sidecar 永不
+            # 影响文本入库。
+            try:
+                _persist_pdf_sidecars(source_id, ev, pdf_bytes, tables)
+            except Exception:  # noqa: BLE001
+                logger.warning("pdf sidecar persist failed (fail-open)")
             return source_id
         except Exception as exc:
             if _is_db_locked(exc) and attempt < 5:
@@ -829,6 +926,7 @@ def enrich_search_results(
     limit = max_docs if max_docs is not None else settings.fulltext_max_docs
     timeout = float(settings.fulltext_timeout_s)
     allow_pdf = True
+    # v2 决策②：pdf_quota 不再作为降级门 —— 超限只记监控告警，不降级。
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
         try:
@@ -838,10 +936,9 @@ def enrich_search_results(
         except Exception as exc:
             degrade_return(logger, exc, "pdf quota lookup failed", 0)
             used = 0
-        allow_pdf = used < pdf_quota
-        if not allow_pdf:
-            logger.info(
-                "pdf quota reached for project %s (%s/%s) — dropping PDF tiers this run",
+        if used >= pdf_quota:
+            logger.warning(
+                "pdf quota exceeded for project %s (%s/%s) — continuing (v2: quota is monitor-only)",
                 project_id, used, pdf_quota,
             )
 
@@ -856,25 +953,26 @@ def enrich_search_results(
     if not targets:
         return evidence, report
 
-    def fetch(idx: int) -> tuple[int, str | None, str]:
+    def fetch(idx: int) -> tuple[int, FetchedFulltext | None, str]:
         ev, kind = evidence[idx], targets[idx]
         try:
-            text = _dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
-            return idx, text, _last_acquisition()
+            hit = _dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            return idx, hit, _last_acquisition()
         except Exception as exc:
             return idx, degrade_return(logger, exc, f"fulltext fetch failed ({kind})", None), "text"
 
-    results: dict[int, str | None] = {}
+    results: dict[int, FetchedFulltext | None] = {}
     acquisitions: dict[int, str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-        for idx, text, acq in ex.map(fetch, list(targets)):
-            results[idx] = text
+        for idx, hit, acq in ex.map(fetch, list(targets)):
+            results[idx] = hit
             acquisitions[idx] = acq
 
     out: list[Evidence] = []
     for i, ev in enumerate(evidence):
         kind = targets.get(i)
-        text = results.get(i)
+        hit = results.get(i)
+        text = hit.text if hit else None
         if kind and text:
             chunks = _text_to_chunks(text, ev)
             if chunks:
@@ -883,6 +981,8 @@ def enrich_search_results(
                         text, ev, kind,
                         project_id=project_id,
                         acquisition=acquisitions.get(i),
+                        pdf_bytes=hit.pdf_bytes if hit else None,
+                        tables=hit.tables if hit else None,
                     )
                 out.extend(chunks)
                 report.record(kind, True)

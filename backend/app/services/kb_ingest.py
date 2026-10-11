@@ -511,7 +511,8 @@ def _fetch_one(
     fetch_reason: str | None = None
     try:
         with timing.span("fetch"):
-            text = ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            _hit = ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            text = _hit.text if _hit else None
             doc["acquisition"] = ff._last_acquisition()
     except ff.FetchError as fe:
         text = None
@@ -667,10 +668,7 @@ def ingest_evidence_docs(
     for doc in docs:  # announce the full queue up front
         emit(doc)
 
-    # Per-project PDF quota, resolved once per batch: the PDF tiers are dropped
-    # for every document once the project has spent its budget, so one run cannot
-    # blow past it (the guardrail bounds the expensive path, it does not just
-    # count it after the fact).
+    # Per-project PDF quota: v2 决策② —— 不再作为降级门，仅监控告警。
     allow_pdf = True
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
@@ -680,10 +678,9 @@ def ingest_evidence_docs(
             pdf_used = get_source_store().count_for_project(project_id, acquisition="pdf")
         except Exception as exc:
             pdf_used = degrade_return(logger, exc, "pdf quota lookup failed", 0)
-        allow_pdf = pdf_used < pdf_quota
-        if not allow_pdf:
-            logger.info(
-                "kb_ingest PDF 配额已满: %s (%s/%s)，本轮跳过 PDF 解析路径",
+        if pdf_used >= pdf_quota:
+            logger.warning(
+                "kb_ingest PDF 配额超限: %s (%s/%s)，继续执行（v2: quota 仅监控）",
                 project_id, pdf_used, pdf_quota,
             )
 

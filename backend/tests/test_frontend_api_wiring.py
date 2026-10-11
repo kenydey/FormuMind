@@ -43,6 +43,7 @@ API_ONLY_ROUTES: dict[str, str] = {
     "/api/formulation-skills": "read server-side by the recommender; the skills screen uses the merged /api/skills catalog",
     "/api/formulation-skills/{}": "read server-side by the recommender; the skills screen uses the merged /api/skills catalog",
     "/api/kb/golden-questions": "lists the curated golden retrieval set; the quality screen only runs it (/api/kb/golden-eval/run)",
+    "/api/kb/acquisition-stats": "全文获取质量监控（v2 P0-4）：供运维/评估脚本读取 acquisition 分布，无前端页面",
     "/api/kb/relevance-shadow/stats": _OPS,
     "/api/ops/datalab-orphans": _OPS,
     "/api/ops/datalab-orphans/cleanup": _OPS,

@@ -56,6 +56,23 @@ def _parse_heading(line: str) -> tuple[int, str] | None:
     return level, ""
 
 PAGE_MARKER_RE = re.compile(r"^\s*<!--\s*page:(\d+)\s*-->\s*$")
+# v2 P0-9: 视觉解析占位符 —— vision 失败/跳过时的降级文本，入库即检索噪声。
+# 保知识库质量：chunking 时直接丢弃，不进入索引。
+VISION_PLACEHOLDER_RE = re.compile(r"（视觉解析(已跳过|异常|未返回结果)")
+
+
+def _is_vision_placeholder(block: str) -> bool:
+    """True if the block is only vision-failure placeholder quote lines."""
+    if not VISION_PLACEHOLDER_RE.search(block):
+        return False
+    # 占位符块只含引用行（> 开头）与空行，不含实质内容
+    for line in block.split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        if not s.startswith(">"):
+            return False
+    return True
 BLOCK_MARKER_RE = re.compile(
     r"^\s*<!--\s*block:(text|table|formula|figure|code|image)\s*-->\s*$"
 )
@@ -260,7 +277,9 @@ def _split_blocks(body: str) -> list[str]:
 
     def flush() -> None:
         block = "\n".join(current).strip()
-        if block:
+        # v2 P0-9: 视觉解析占位符直接丢弃，不进入索引（检索噪声）。
+        # 占位符形如 ">\n> _（视觉解析…）_"，strip 后只剩引用行。
+        if block and not _is_vision_placeholder(block):
             blocks.append(block)
         current.clear()
 
@@ -444,9 +463,29 @@ def _split_pages(md: str) -> list[tuple[int | None, str]]:
     return [(p, "\n".join(body).strip()) for p, body in segments if "\n".join(body).strip()]
 
 
+_EXAMPLE_HEAD_LINE = re.compile(
+    r"^\s*(example|embodiment|实施例|实例)\s*([0-9０-９]+|[IVXLC]+)?\s*[:：.]?\s*$",
+    re.I,
+)
+
+
+def mark_example_boundaries(md: str) -> str:
+    """v2 P1-10: 专利 Example N 感知切分 —— 独立成行的 Example 头转为 ``##`` 标题。
+
+    使 ``_split_sections`` 按示例边界切分，单个示例不被拦腰切断；
+    heading_path 自然带上 "Example N"，示例 chunk 可整体召回。
+    非独立成行的行内提及（如 "as shown in example 1"）不受影响。
+    """
+    return "\n".join(
+        f"## {line.strip()}" if _EXAMPLE_HEAD_LINE.match(line) else line
+        for line in (md or "").split("\n")
+    )
+
+
 def chunk_markdown(
     md: str, *, max_chars: int = 1600, overlap: int = 200,
     bookmarks: list[tuple[str, int, int]] | None = None,
+    example_aware: bool = False,
 ) -> list[Chunk]:
     """Structure-aware chunking; degrades to the plain splitter for non-Markdown.
 
@@ -456,6 +495,9 @@ def chunk_markdown(
     md = (md or "").strip()
     if not md:
         return []
+    # v2 P1-10: 专利 Example N 感知切分（默认关，仅专利路径开启）。
+    if example_aware:
+        md = mark_example_boundaries(md)
 
     # PageIndex 借鉴 A2: 书签按页区间展开（只需算一次）
     _bm_map: dict[int, str] = {}

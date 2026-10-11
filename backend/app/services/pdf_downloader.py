@@ -34,6 +34,7 @@ import hashlib
 import logging
 import time
 from pathlib import Path
+from typing import NamedTuple
 from .errors import degrade_return, log_handled_exception
 from .http_safe import UnsafeAddressError, ssrf_safe_client
 import re
@@ -473,7 +474,37 @@ def fetch_patent_pdf(patent_id: str, timeout: float = 20.0) -> bytes | None:
     return fetch_pdf(pdf_url, timeout)
 
 
-def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: bool | None = None) -> str | None:
+def _epo_fulltext_fallback(patent_id: str, timeout: float) -> "FetchedFulltext | None":
+    """v2 P1-8: Google Patents 不可达时，EP 专利回退到 EPO OPS 全文。
+
+    仅当配置了 EPO 凭证且 publication 为 EP 时尝试；否则返回 None。
+    fail-open：任何异常都不抛。
+    """
+    try:
+        from ..config import get_settings
+
+        settings = get_settings()
+        key = getattr(settings, "epo_consumer_key", None)
+        secret = getattr(settings, "epo_consumer_secret", None)
+        if not (key and secret):
+            return None
+        pub = (patent_id or "").strip().upper()
+        if not pub.startswith("EP"):
+            return None
+        from .epo_ops import fetch_fulltext as epo_fetch_fulltext
+
+        text = epo_fetch_fulltext(pub, key=key, secret=secret, timeout=timeout)
+        if text and len(text.strip()) > 200:
+            logger.info("patent %s: EPO OPS fulltext fallback ok (%d chars)", pub, len(text))
+            return FetchedFulltext(text=text)
+    except Exception:  # noqa: BLE001 - fail-open
+        logger.debug("EPO fulltext fallback failed (fail-open)", exc_info=True)
+    return None
+
+
+def fetch_patent_fulltext(
+    patent_id: str, timeout: float = 20.0, *, prefer_html: bool | None = None
+) -> FetchedFulltext | None:
     """Full text for a publication number, from HTML or PDF.
 
     One landing-page request serves both tiers, so choosing HTML costs nothing
@@ -481,6 +512,10 @@ def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: boo
 
     P3.1b F2: when HTML is preferred but carries no table signal, try the PDF
     once and keep it if it exposes a parseable table (or is substantially longer).
+
+    v2 P0-6: returns ``FetchedFulltext`` — the PDF tier keeps the raw bytes
+    and parsed tables so the ingest path can persist them (sidecar + source
+    file) instead of dropping the bytes after text extraction.
     """
     from ..config import get_settings
 
@@ -489,40 +524,52 @@ def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: boo
 
     html = fetch_patent_landing(patent_id, timeout)
     if not html:
-        return None
+        # v2 P1-8: Google 不可达 → EPO OPS 回退（仅 EP + 有凭证）。
+        return _epo_fulltext_fallback(patent_id, timeout)
 
-    def _try_pdf() -> str | None:
+    def _try_pdf() -> FetchedFulltext | None:
         pdf_url = _pdf_url_from_landing(html)
         if not pdf_url:
             return None
         pdf = fetch_pdf(pdf_url, timeout)
         if not pdf:
             return None
-        text = _extract_text(pdf)
+        # v2 P0-6: 完整解析一次，文本+字节+表格全保留，不再只取文本。
+        parsed = _parse_pdf_bytes(pdf)
+        text = parsed.markdown if parsed is not None else _raw_pdf_stream_text(pdf)
+        tables = list(getattr(parsed, "tables", None) or []) or None
         if text and len(text.strip()) > 200:
-            return text
+            return FetchedFulltext(text=text, pdf_bytes=pdf, tables=tables)
         return None
 
     if not prefer_html:
-        pdf_text = _try_pdf()
-        if pdf_text:
-            return pdf_text
+        hit = _try_pdf()
+        if hit:
+            return hit
         # Fall through: a missing or unparseable PDF is not a reason to discard
         # a landing page that already holds the description and claims.
 
     text = patent_text_from_html(html) or None
     if prefer_html and text and not text_has_table_signal(text) and not html_has_table_signal(html):
-        pdf_text = _try_pdf()
-        if pdf_text and (
-            text_has_table_signal(pdf_text) or len(pdf_text) > len(text) * 1.2
+        hit = _try_pdf()
+        if hit and (
+            text_has_table_signal(hit.text) or len(hit.text) > len(text) * 1.2
         ):
             logger.info(
                 "patent %s: HTML had no table signal; using PDF text (%d chars)",
                 patent_id,
-                len(pdf_text),
+                len(hit.text),
             )
-            return pdf_text
-    return text or None
+            return hit
+    if text:
+        return FetchedFulltext(text=text)
+    return None
+
+
+def fetch_patent_text(patent_id: str, timeout: float = 20.0, *, prefer_html: bool | None = None) -> str | None:
+    """Back-compat wrapper: ``fetch_patent_fulltext`` 的纯文本视图。"""
+    hit = fetch_patent_fulltext(patent_id, timeout=timeout, prefer_html=prefer_html)
+    return hit.text if hit else None
 
 
 # ── Text extraction ──────────────────────────────────────────────────────────
@@ -554,6 +601,23 @@ def _raw_pdf_stream_text(content: bytes) -> str:
     return "\n\n".join(texts)
 
 
+def _parse_pdf_bytes(content: bytes):
+    """v2 P0-6: PDF 字节 → 完整 ParseResult（表格/页码/bbox 全保留）。
+
+    全文下载路径用它替代裸 ``_extract_text``，以便把 ``parsed.tables``
+    透传给入库 sidecar，而不是解析完只取文本就丢弃。
+    """
+    from .parsing import parse_document
+
+    try:
+        result = parse_document(content, "pdf")
+        if result is not None and getattr(result, "ok", False):
+            return result
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("parse_pdf_bytes failed (fail-open): %s", exc)
+    return None
+
+
 def _extract_text(content: bytes) -> str:
     """Extract text/Markdown from PDF bytes.
 
@@ -562,13 +626,21 @@ def _extract_text(content: bytes) -> str:
     raw Tj-operator parser that handles simple unencrypted PDFs (test fixture
     + most patent PDFs).
     """
-    from .parsing import parse_document
-
-    result = parse_document(content, "pdf")
-    if result.ok:
+    result = _parse_pdf_bytes(content)
+    if result is not None:
         return result.markdown
-
     return _raw_pdf_stream_text(content)
+
+
+class FetchedFulltext(NamedTuple):
+    """v2 P0-6: 全文下载结果 —— 文本 + 原始 PDF 字节 + 解析出的表格。
+
+    pdf_bytes / tables 仅当 PDF tier 命中时非空；HTML tier 均为 None。
+    """
+
+    text: str
+    pdf_bytes: bytes | None = None
+    tables: list | None = None
 
 
 # ── Chunking ─────────────────────────────────────────────────────────────────

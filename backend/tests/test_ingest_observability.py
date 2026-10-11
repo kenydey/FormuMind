@@ -23,6 +23,7 @@ from app.config import get_settings
 from app.db.database import Base, make_engine, make_session_factory
 from app.domain.schemas import Evidence
 from app.services import fulltext_fetcher as ff
+from app.services.pdf_downloader import FetchedFulltext
 from app.services import kb_ingest
 
 LONG_TEXT = "# 防腐蚀专利\n\n" + "环氧树脂与磷酸锌协同防腐蚀机理研究。" * 60
@@ -87,7 +88,7 @@ def test_record_ingest_failure_inserts_failed_row(stores):
 
 def test_record_ingest_failure_never_downgrades_indexed_row(stores, monkeypatch):
     src, _ = stores
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     kb_ingest.ingest_evidence_docs([_ev("US1111111")])
     indexed = src.find_by_origin_url("US1111111")
     # full_text is cleared after chunking (clear_full_text); the row is real
@@ -196,7 +197,7 @@ def test_failed_row_is_retried_not_skipped(stores, monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(
         ff, "_fetch_patent_text",
-        lambda ev, t: calls.append(ev.identifier) or LONG_TEXT,
+        lambda ev, t: calls.append(ev.identifier) or FetchedFulltext(text=LONG_TEXT),
     )
     result = kb_ingest.ingest_evidence_docs([_ev("US3333333")])
 
@@ -213,7 +214,7 @@ def test_failed_row_is_retried_not_skipped(stores, monkeypatch):
 
 def test_indexed_row_skipped_with_reason(stores, monkeypatch):
     src, _ = stores
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
     kb_ingest.ingest_evidence_docs([_ev("US4444444")])
 
     result = kb_ingest.ingest_evidence_docs([_ev("US4444444")])
@@ -246,7 +247,7 @@ def test_failure_persistence_is_fail_open(stores, monkeypatch):
     """A broken failure-persistence path must not fail the batch itself."""
     from app.db import source_store as source_store_mod
 
-    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: LONG_TEXT)
+    monkeypatch.setattr(ff, "_fetch_patent_text", lambda ev, t: FetchedFulltext(text=LONG_TEXT))
 
     def _broken(*a, **k):
         raise RuntimeError("db down")
