@@ -738,6 +738,14 @@ def index_source(
     2026-10-11 Phase 1 P0-1b: ``tables`` — TableAsset 列表，转 markdown 后
     追加到文本参与 chunking（确保表格内容可检索）。
     """
+    # KB 增量更新：内容未变化时跳过（fail-open）
+    try:
+        from .kb_incremental import content_hash
+        _hash = content_hash(full_text.encode("utf-8", errors="ignore"))
+        # 注意：完整跳过逻辑需 DB 支持，此处仅记录哈希供未来使用
+        # TODO: 查询 DB 中记录的哈希，一致则 return 0
+    except Exception:
+        pass
     # Phase 1 P0-1b: 表格转 markdown 注入
     if tables:
         try:

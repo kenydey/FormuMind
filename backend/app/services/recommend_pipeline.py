@@ -137,6 +137,27 @@ def run_recommend_orchestration(
     )
     warnings.extend(gate_warnings)
 
+    # O-1: A/B 追踪 —— 记录 prompt 版本和接地通过率
+    try:
+        from .recommend_ab_track import track_recommendation
+        # 计算接地通过率（high grounding 的成分比例）
+        total_comps = sum(len(getattr(f, "components", []) or []) for f in grounded_formulas)
+        high_grounded = sum(
+            1 for f in grounded_formulas
+            for c in (getattr(f, "components", []) or [])
+            if getattr(c, "grounding_confidence", "") == "high"
+        )
+        grounding_rate = (high_grounded / total_comps) if total_comps > 0 else 0
+        track_recommendation(
+            recommend_id=recommend_id,
+            prompt_version=prompt_variant,
+            consensus_enabled=getattr(settings, "recommend_consensus_enabled", False),
+            grounding_rate=grounding_rate,
+            n_candidates=len(grounded_formulas),
+        )
+    except Exception:
+        pass
+
     return RecommendBundle(
         aligned_formulas=aligned,
         scored=scored,

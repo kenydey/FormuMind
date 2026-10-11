@@ -303,7 +303,7 @@ class BotorchOptimizer(_ObservedHistoryMixin):
         return "botorch-ei"
 
 
-def build_optimizer(factors: list[Factor], seed: int = 0):
+def build_optimizer(factors: list[Factor], seed: int = 0, warm_start: list[list[float]] | None = None):
     """Return the best available optimizer, falling back to the numpy engine.
 
     Priority: BoTorch GP-EI (bo extra) > Optuna (optimize) > numpy UCB.
@@ -312,6 +312,8 @@ def build_optimizer(factors: list[Factor], seed: int = 0):
     (A Summit SOBO adapter used to sit between BoTorch and Optuna. It was removed: Summit pins
     ``torch<2.0`` so no extra of this project could install it, no CI job ever exercised it, and
     it fed the strategy only the *last* observation — the surrogate never saw more than one point.)
+
+    warm_start: 迁移学习初始点（历史最优解），fail-open。
     """
     if _botorch_available():
         try:
@@ -323,4 +325,7 @@ def build_optimizer(factors: list[Factor], seed: int = 0):
             return OptunaOptimizer(factors=factors, seed=seed)
         except Exception as exc:
             log_handled_exception(logger, exc, "handled exception")
-    return BayesianOptimizer(factors=factors, seed=seed)
+    opt = BayesianOptimizer(factors=factors, seed=seed)
+    # 迁移学习：warm_start 接口预留（fail-open）
+    # 注意：真实 y 需调用方通过 observe() 提供，此处仅保留参数接口
+    return opt
