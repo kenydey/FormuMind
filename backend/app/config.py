@@ -967,9 +967,9 @@ class Settings(BaseSettings):
     kb_recommend_include_global: bool = True
     # 仅推荐/研究融合路径的可选 LLM 精排（默认关；不改动 search_rerank_enabled）。
     kb_recommend_rerank_enabled: bool = False
-    # PageIndex 借鉴 A2: PDF 内嵌书签 → heading_path 补充源。默认关；
+    # PageIndex 借鉴 A2: PDF 内嵌书签 → heading_path 补充源。默认开（2026-10-11 实测 24 篇论文 58% 书签可用）；
     # 开启后 parse 成功时读一次书签，chunking 给空 heading_path 的 chunk 按页补充。
-    pdf_bookmark_headings_enabled: bool = False
+    pdf_bookmark_headings_enabled: bool = True
 
     # 化学/产品实体抽取（KB stream P2）：入库切块时识别 CAS/分子式/SMILES/反应式
     # 与商业牌号（规则层离线；LLM 层搭 source_guide 便车），写入 chunk 元数据与
