@@ -13,6 +13,8 @@ import json
 import time
 from pathlib import Path
 
+from ._filelock import lock_exclusive, unlock
+
 
 _TRACK_FILE = Path.home() / ".formumind" / "recommend_ab_tracking.jsonl"
 
@@ -26,7 +28,6 @@ def track_recommendation(
 ) -> None:
     """记录一次推荐的 A/B 数据。fail-open。"""
     try:
-        import fcntl
         _TRACK_FILE.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": time.time(),
@@ -36,13 +37,13 @@ def track_recommendation(
             "grounding_rate": grounding_rate,
             "n_candidates": n_candidates,
         }
-        with open(_TRACK_FILE, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with open(_TRACK_FILE, "a", encoding="utf-8") as f:
+            lock_exclusive(f)  # portable (flock / msvcrt); a bare ``import fcntl`` silently dropped every record on Windows
             try:
                 f.write(json.dumps(record) + "\n")
                 f.flush()
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                unlock(f)
     except Exception:
         pass
 
@@ -62,7 +63,7 @@ def get_ab_stats(days: int = 14) -> dict:
         consensus_rates = []
         no_consensus_rates = []
 
-        with open(_TRACK_FILE) as f:
+        with open(_TRACK_FILE, encoding="utf-8") as f:
             for line in f:
                 try:
                     r = json.loads(line)

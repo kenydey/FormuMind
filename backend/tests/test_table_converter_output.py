@@ -185,10 +185,15 @@ def _assert_datasheet(result: parsing.ParseResult):
     assert warnings == []
 
 
-def test_a_real_docx_datasheet_keeps_its_header_and_its_units():
+@pytest.mark.parametrize("tier", ["docx", "markitdown"])
+def test_a_real_docx_datasheet_keeps_its_header_and_its_units(tier, monkeypatch):
+    """The native walker is tried first (B-2); with it switched off the MarkItDown tier must give the same datasheet."""
     pytest.importorskip("docx")
     pytest.importorskip("markitdown")
     import docx
+
+    if tier == "markitdown":
+        monkeypatch.setattr(parsing, "_parse_docx", lambda content: None)
 
     doc = docx.Document()
     doc.add_heading("环氧锌磷酸盐底漆 技术数据表（TDS）", 1)
@@ -200,7 +205,7 @@ def test_a_real_docx_datasheet_keeps_its_header_and_its_units():
     buf = io.BytesIO()
     doc.save(buf)
     result = parsing.parse_document(buf.getvalue(), "docx")
-    assert result.parser == "markitdown"
+    assert result.parser == tier
     _assert_datasheet(result)
 
 

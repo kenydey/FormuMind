@@ -595,11 +595,24 @@ def controlled_check(smiles_or_cas: str) -> bool | None:
     return None
 
 
-def explosive_check(cas: str) -> bool | None:
+def _peek_cached(tool: str, arg: str) -> Any:
+    """The cached value for ``(tool, arg)`` if it is there and fresh, else None - never computes, never touches the network."""
+    normalized = arg.strip() if tool in _CASE_SENSITIVE_TOOLS else arg.strip().lower()
+    with _CACHE_LOCK:
+        entry = _CACHE.get((tool, normalized))
+    if entry and time.time() - entry[0] <= _ttl_for(entry[1]):
+        return entry[1]
+    return None
+
+
+def explosive_check(cas: str, *, cache_only: bool = False) -> bool | None:
     """GHS explosive screen by CAS. True=explosive hazard, False=clear, None=unknown.
 
     Reads GHS Section 2.1 classification straight from PubChem PUG-View (the
     same underlying source ChemCrow's ExplosiveCheck wrapped).
+
+    ``cache_only``: answer from the gateway cache or not at all (None) - for callers that run inside optimisation loops
+    and must not wait on a request.
     """
     cas = (cas or "").strip()
     if (
@@ -609,6 +622,8 @@ def explosive_check(cas: str) -> bool | None:
         or not pubchem_available()
     ):
         return None
+    if cache_only:
+        return _peek_cached("explosive_check", cas)
 
     def compute() -> bool | None:
         return _run_with_timeout(lambda: _pubchem_explosive(cas), None)
@@ -642,15 +657,18 @@ def screen_formulation(form: Any) -> list[str]:
     as a separate name only so existing call sites (``chem_screen`` /
     ``chem_screen_local`` flags in the pipeline) keep their contracts.
     """
-    return screen_formulation_local(form)
+    return screen_formulation_local(form, allow_network=True)
 
 
-def screen_formulation_local(form: Any) -> list[str]:
+def screen_formulation_local(form: Any, *, allow_network: bool = False) -> list[str]:
     """零网络化学预筛 — molbloom patent (本地) + RDKit 价键/PAINS/Brenk 校验。
 
-    自 ChemCrow 移除后与 ``screen_formulation`` 等价(全本地、不触网)，
     可安全用于优化循环(NSGA-II 每代数百次调用)。返回告警字符串列表，
     永不阻塞。缺 RDKit 或 molbloom 时静默降级(只返回能算的检查)。
+
+    P1-13 爆炸性（GHS 2.1）筛查读 PubChem：默认 ``allow_network=False`` 只读网关缓存（命中才告警，
+    不发请求）——优化循环里一个未缓存的 CAS 不该等一次网络往返；推荐链路
+    （``screen_formulation``）传 ``allow_network=True``，把结果写进缓存供循环使用。
     """
     warnings: list[str] = []
     if not rdkit_available():
@@ -698,7 +716,7 @@ def screen_formulation_local(form: Any) -> list[str]:
         # P1-13: 爆炸性筛查（GHS 2.1，PubChem 缓存；无 CAS/无网络时静默跳过）
         try:
             cas = getattr(ing, "cas_no", None) or getattr(ing, "cas", None)
-            if cas and explosive_check(cas) is True:
+            if cas and explosive_check(cas, cache_only=not allow_network) is True:
                 warnings.append(
                     f"⚠️ 安全警告：{name}（CAS {cas}）被 GHS 归类为爆炸性物质，"
                     f"建议人工确认合规性后再采用"

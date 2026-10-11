@@ -32,14 +32,16 @@ def cap_2mib(monkeypatch):
     monkeypatch.setattr(
         ingest_mod,
         "get_settings",
-        lambda: SimpleNamespace(ingest_max_upload_bytes=2 * 1024 * 1024),
+        lambda: SimpleNamespace(ingest_max_upload_bytes=2 * 1024 * 1024, ingest_upload_timeout_s=300.0),
     )
 
 
 def test_under_limit_reads_fully(cap_2mib):
-    up = _FakeUpload([b"a" * (1024 * 1024), b"b" * (512 * 1024)])
+    # a real PDF starts with its magic number; the upload path rejects a file whose head contradicts its extension (415)
+    head = b"%PDF-1.7\n" + b"a" * (1024 * 1024 - 9)
+    up = _FakeUpload([head, b"b" * (512 * 1024)])
     content = asyncio.run(ingest_mod._read_upload_capped(up, "ok.pdf"))
-    assert content == b"a" * (1024 * 1024) + b"b" * (512 * 1024)
+    assert content == head + b"b" * (512 * 1024)
 
 
 def test_over_limit_stops_early_with_413(cap_2mib):
@@ -53,6 +55,6 @@ def test_over_limit_stops_early_with_413(cap_2mib):
 
 
 def test_exact_limit_passes(cap_2mib):
-    up = _FakeUpload([b"y" * (1024 * 1024), b"y" * (1024 * 1024)])
+    up = _FakeUpload([b"%PDF-1.7\n" + b"y" * (1024 * 1024 - 9), b"y" * (1024 * 1024)])
     content = asyncio.run(ingest_mod._read_upload_capped(up, "edge.pdf"))
     assert len(content) == 2 * 1024 * 1024

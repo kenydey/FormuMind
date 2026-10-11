@@ -238,6 +238,7 @@ def test_seeded_rng_restores_state_on_early_return():
     assert (np.random.get_state()[1] == before).all()
 
 
+@pytest.mark.skipif(not baybe_available(), reason="baybe not installed")
 def test_recommend_cold_start_does_not_pollute_rng():
     """v27 P3-27: recommend 冷启动路径（早期返回）不污染调用方 RNG。"""
     import numpy as np

@@ -214,9 +214,10 @@ def test_oa_enrich_parallel_fetch_serial_persist(tmp_path, monkeypatch):
     def fake_fetch(kind, ev, timeout, *, allow_pdf=True):
         fetch_threads.append(threading.get_ident())
         time.sleep(0.4)
-        return f"TEXT for {ev.identifier}"
+        # v2 P0-6: the dispatcher returns the whole FetchedFulltext (text + PDF bytes + tables), not a bare string
+        return SimpleNamespace(text=f"TEXT for {ev.identifier}", pdf_bytes=None, tables=None)
 
-    def fake_persist(text, ev, kind, *, project_id=None, acquisition=None):
+    def fake_persist(text, ev, kind, *, project_id=None, acquisition=None, pdf_bytes=None, tables=None):
         persist_threads.append(threading.get_ident())
         return f"src-{ev.identifier}"
 

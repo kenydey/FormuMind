@@ -22,13 +22,22 @@ _TABLE = "document_chunks"
 _COL = "page_end"
 
 
+def _has_table(table: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(table)
+
+
 def _has_column(table: str, column: str) -> bool:
-    bind = op.get_bind()
-    insp = sa.inspect(bind)
+    # A database that never had the table (a minimal legacy schema stamped at an earlier revision) has nothing to
+    # alter: inspector.get_columns() raises NoSuchTableError for it, which used to abort `upgrade head`.
+    if not _has_table(table):
+        return False
+    insp = sa.inspect(op.get_bind())
     return any(c["name"] == column for c in insp.get_columns(table))
 
 
 def upgrade() -> None:
+    if not _has_table(_TABLE):
+        return
     if not _has_column(_TABLE, _COL):
         op.add_column(
             _TABLE,

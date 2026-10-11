@@ -33,12 +33,13 @@ def smiles_to_fingerprint_hex(smiles: str) -> str | None:
         return None
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem
+
+        from .fingerprints import morgan_bitvect
+
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
-        fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=_FP_BITS)
-        return fp.ToBitString()
+        return morgan_bitvect(mol, 2, _FP_BITS).ToBitString()
     except Exception:
         return None
 

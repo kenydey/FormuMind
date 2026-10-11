@@ -17,3 +17,17 @@ def test_leak_runtime_secret_part_one() -> None:
 
 def test_leak_runtime_secret_part_two_starts_clean() -> None:
     assert get_runtime_secrets().snapshot() == {}
+
+
+def test_leak_embedding_breaker_part_one() -> None:
+    from app.services import kb_index
+
+    kb_index._EMBED_FAIL_COUNT["some-model"] = 99
+    kb_index._EMBED_BROKEN["some-model"] = 1.0
+    assert kb_index._EMBED_BROKEN
+
+
+def test_leak_embedding_breaker_part_two_starts_clean() -> None:
+    from app.services import kb_index
+
+    assert kb_index._EMBED_BROKEN == {} and kb_index._EMBED_FAIL_COUNT == {}

@@ -832,7 +832,33 @@ def run_file_ingest_task(self, payload: dict) -> dict:
 
 
 def _file_ingest_impl(task_id: str, payload: dict) -> dict:
-    """Shared body for the Celery task and the eager-mode background thread."""
+    """Shared body for the Celery task and the eager-mode background thread.
+
+    Everything that can fail sits inside one ``try``: the per-file parse loop used to run before it, so a parser that
+    raised (``ParserUnavailable`` - no PDF parser installed) left the task at ``running`` for ever and the uploaded
+    files in their temp directory; only a failure while indexing was recorded.
+    """
+    try:
+        return _file_ingest_body(task_id, payload)
+    except Exception as exc:
+        logger.exception("file ingest task failed")
+        err = {"error": str(exc)}
+        persist_result(task_id, err, failed=True)
+        _persist_terminal(task_id, "file_ingest", err, failed=True, message=str(exc))
+        raise
+    finally:
+        upload_dir = payload.get("dir")
+        if upload_dir:
+            try:
+                import shutil
+
+                shutil.rmtree(upload_dir, ignore_errors=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("file ingest: temp cleanup skipped: %s", exc)
+
+
+def _file_ingest_body(task_id: str, payload: dict) -> dict:
+    """The work of a file-ingest job; ``_file_ingest_impl`` owns its failure and cleanup."""
     from ..services import colbert_store
     from ..services.ingestion import ingest_files_batch
 
@@ -958,46 +984,30 @@ def _file_ingest_impl(task_id: str, payload: dict) -> dict:
         message="建立检索索引…",
         progress=0.95,
     )
-    try:
-        # P0-1: "skipped" 仅=无真实文本（see api/ingest.py）。
-        if last_extraction_status != "skipped":
-            colbert_store.index_evidence(all_evidence)
-        result = {
-            "evidence": [e.model_dump() for e in all_evidence],
-            "total": len(all_evidence),
-            "files_processed": files_processed,
-            "source_id": last_source_id,
-            "extraction_status": last_extraction_status,
-            "duplicates": duplicates,
-            "duplicate_source_ids": duplicate_source_ids,
-            # P2: 解析截断等提示 —— 前端上传完成态展示。
-            "warnings": all_warnings,
-        }
-        message = (
-            f"文件入库完成：{len(all_evidence)} 条"
-            if all_evidence
-            else "文件入库完成（未提取到文本）"
-        )
-        if duplicates:
-            message += f"，跳过 {len(duplicates)} 个重复文件"
-        _persist_terminal(task_id, "file_ingest", result, message=message)
-        persist_result(task_id, result, failed=False)
-        return result
-    except Exception as exc:
-        logger.exception("file ingest task failed")
-        err = {"error": str(exc)}
-        persist_result(task_id, err, failed=True)
-        _persist_terminal(task_id, "file_ingest", err, failed=True, message=str(exc))
-        raise
-    finally:
-        upload_dir = payload.get("dir")
-        if upload_dir:
-            try:
-                import shutil
-
-                shutil.rmtree(upload_dir, ignore_errors=True)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("file ingest: temp cleanup skipped: %s", exc)
+    # P0-1: "skipped" 仅=无真实文本（see api/ingest.py）。
+    if last_extraction_status != "skipped":
+        colbert_store.index_evidence(all_evidence)
+    result = {
+        "evidence": [e.model_dump() for e in all_evidence],
+        "total": len(all_evidence),
+        "files_processed": files_processed,
+        "source_id": last_source_id,
+        "extraction_status": last_extraction_status,
+        "duplicates": duplicates,
+        "duplicate_source_ids": duplicate_source_ids,
+        # P2: 解析截断等提示 —— 前端上传完成态展示。
+        "warnings": all_warnings,
+    }
+    message = (
+        f"文件入库完成：{len(all_evidence)} 条"
+        if all_evidence
+        else "文件入库完成（未提取到文本）"
+    )
+    if duplicates:
+        message += f"，跳过 {len(duplicates)} 个重复文件"
+    _persist_terminal(task_id, "file_ingest", result, message=message)
+    persist_result(task_id, result, failed=False)
+    return result
 
 
 def dispatch_file_ingest(files: list[dict], *, upload_dir: str | None = None) -> str | None:

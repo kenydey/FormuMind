@@ -133,7 +133,10 @@ def test_an_incomplete_recipe_scores_below_the_same_recipe_completed():
     # multi_objective_score 归一化，不再是 raw 单值。核心断言：完整配方得分
     # 高于同配方缺料版（closure 折扣生效）。
     assert a.score > b.score
-    assert b.predicted["salt_spray_hours"] < a.predicted["salt_spray_hours"]
+    # P1-6: the predictor normalises a recipe whose weights fall short of 100 % (grounding dropped an ingredient) before
+    # predicting, so cost / VOC are not biased low; the shortfall is paid for in the score (the closure discount), not
+    # in the displayed properties.
+    assert b.predicted["salt_spray_hours"] == pytest.approx(a.predicted["salt_spray_hours"])
 
 
 def _rank(req, forms):

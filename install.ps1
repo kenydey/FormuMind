@@ -302,7 +302,9 @@ if ($embModel -eq "BAAI/bge-m3" -or $embModel -eq "Qwen/Qwen3-Embedding-0.6B") {
   $dlAns = Read-Host "    模型约 1-2GB，是否现在下载？[y/N]"
   if ($dlAns -match "^[Yy]$") {
     Write-Host "    下载中..."
-    & $VenvPython -c "from huggingface_hub import snapshot_download; snapshot_download('$embModel', allow_patterns=['*.json','*.txt','*.model','*.safetensors','*.bin']); print('    下载完成')"
+    # 可选步骤：下载失败（网络 / 磁盘）不应中止安装，首次使用时会自动再下载
+    $dlOk = Invoke-Optional { & $VenvPython -c "from huggingface_hub import snapshot_download; snapshot_download('$embModel', allow_patterns=['*.json','*.txt','*.model','*.safetensors','*.bin']); print('    下载完成')" }
+    if (-not $dlOk) { Write-Warn "模型下载失败，首次使用时将自动重试" }
   } else {
     Write-Host "    已跳过下载，首次使用时自动下载"
   }

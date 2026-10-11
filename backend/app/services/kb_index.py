@@ -43,6 +43,18 @@ _EMBED_BREAKER_THRESHOLD = 5
 _EMBED_BROKEN: dict[str, float] = {}  # v22: 模型名 → 熔断时间戳（含 TTL，超时自动半开重试）
 _EMBED_BREAKER_COOLDOWN_S = 600.0  # v22: 熔断冷却时间（秒），超时后允许一次半开重试
 
+def reset_embed_breaker() -> None:
+    """Close every embedding-model breaker (test seam; a restart does the same in production).
+
+    The breaker is process-global, and an environment without sentence-transformers fails every real embedding call: five
+    ingests in one test process open it, after which every later test that mocks ``_embed_texts`` is skipped by the
+    breaker instead of reaching its mock - whether such a test passes then depends on which files ran before it.
+    """
+    with _EMBED_BREAKER_LOCK:
+        _EMBED_FAIL_COUNT.clear()
+        _EMBED_BROKEN.clear()
+
+
 _KB_COVERAGE_LOCK = _threading.Lock()
 # v15: 按语言分桶（en/zh 有向量；bm25_fallback 无向量走 BM25）
 _KB_COVERAGE = {

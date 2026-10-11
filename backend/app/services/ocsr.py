@@ -262,7 +262,7 @@ def detect_hardware_tier() -> dict:
         mem_gb = psutil.virtual_memory().total / (1024 ** 3)
     except Exception:
         try:
-            with open("/proc/meminfo") as f:
+            with open("/proc/meminfo", encoding="utf-8") as f:
                 for line in f:
                     if line.startswith("MemTotal:"):
                         mem_gb = int(line.split()[1]) / (1024 ** 2)

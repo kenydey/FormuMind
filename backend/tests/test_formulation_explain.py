@@ -61,7 +61,11 @@ def test_build_explain_hits_and_uncertainty():
     assert isinstance(explain, FormulationExplain)
     assert form.explain is explain
     assert any("salt_spray_hours" in h for h in explain.objectives_hit)
-    assert any("KG实测" in h for h in explain.objectives_hit)
+    # P1-11: "this material has measured data" is not "this recipe meets the objective" - listed apart, in the notes
+    assert not any("KG实测" in h for h in explain.objectives_hit)
+    assert any("KG实测" in n and "非本配方实测" in n for n in explain.notes)
+    # P1-12: the LLM's rationale is labelled as generated, unverified
+    assert any(n.startswith("🤖 AI 生成说明") and "barrier + active inhibition" in n for n in explain.notes)
     assert explain.evidence_refs
     assert explain.evidence_refs[0]["source_type"] == "patent"
     assert "Epoxy↔Amine" in explain.kg_signals.get("synergizes", [])

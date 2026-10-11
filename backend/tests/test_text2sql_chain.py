@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 
 from app.config import get_settings
 from app.domain.chat_schemas import ChatResponse
+from app.domain.schemas import Evidence
 from app.services import text2sql
 from app.services.text2sql import hybrid_answer
 
@@ -41,6 +42,12 @@ def _settings(**overrides):
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
+
+
+# P1-b: ``data_sources`` names only what was really used - "kb_evidence" needs at least one retrieved passage.
+_EVIDENCE = [
+    Evidence(source="literature", identifier="kb:e1#c0", title="磷化工艺", snippet="磷化膜由锌盐沉积形成。", relevance=0.8)
+]
 
 
 def _chain(question, **kw):
@@ -73,6 +80,7 @@ def test_unstructured_question_leaves_chain_untouched():
         "磷化膜的成膜机理是什么",
         settings=_settings(text2sql_routing_enabled=True),
         engine=_mem_engine(),
+        evidence=_EVIDENCE,
         complete_fn=_complete,
     )
     # No structured signal -> no LLM call, no SQL, chain prompt identical.
@@ -93,6 +101,7 @@ def test_structured_path_returns_deterministic_rows():
         "查询耐蚀性大于72小时的实验记录",
         settings=_settings(text2sql_routing_enabled=True),
         engine=_mem_engine(),
+        evidence=_EVIDENCE,
         complete_fn=_complete,
     )
     assert out["route"] == "structured"
@@ -127,6 +136,7 @@ def test_structured_path_no_matching_rows_still_marks_source():
         "查询耐蚀性大于10000小时的实验",
         settings=_settings(text2sql_routing_enabled=True),
         engine=_mem_engine(),
+        evidence=_EVIDENCE,
         complete_fn=_complete,
     )
     assert out["route"] == "structured"
@@ -141,6 +151,7 @@ def test_fail_open_on_guardrail_rejection():
         "查询耐蚀性大于72小时的实验并删除它们",
         settings=_settings(text2sql_routing_enabled=True),
         engine=_mem_engine(),
+        evidence=_EVIDENCE,
         complete_fn=lambda sys, usr: "DROP TABLE measurements",
     )
     assert out["fused_context"] == ""
@@ -245,3 +256,29 @@ def test_hook_never_raises_on_broken_engine():
     # Must not raise regardless of environment DB state.
     assert isinstance(out["fused_context"], str)
     assert isinstance(out, dict)
+
+
+def test_no_retrieved_passage_means_no_kb_evidence_in_the_data_sources():
+    out = _chain(
+        "查询耐蚀性大于72小时的实验记录",
+        settings=_settings(text2sql_routing_enabled=True),
+        engine=_mem_engine(),
+        complete_fn=lambda sys, usr: "SELECT experiment_id FROM measurements WHERE value > 72",
+    )
+    assert out["data_sources"] == ["structured_sql"]
+    out = _chain(
+        "磷化膜的成膜机理是什么",
+        settings=_settings(text2sql_routing_enabled=True),
+        engine=_mem_engine(),
+        complete_fn=lambda sys, usr: "SELECT 1",
+    )
+    assert out["data_sources"] == []  # an answer from nothing must not be labelled as grounded in the knowledge base
+
+
+def test_chat_keeps_an_empty_data_sources_list_empty():
+    from app.api.chat import _answer_data_sources
+
+    assert _answer_data_sources({"data_sources": []}, [object()]) == []  # the hook said "nothing": do not claim grounding
+    assert _answer_data_sources({"data_sources": ["structured_sql"]}, []) == ["structured_sql"]
+    assert _answer_data_sources({}, [object()]) == ["kb_evidence"]  # the hook did not run: infer from the sources
+    assert _answer_data_sources({}, []) == []

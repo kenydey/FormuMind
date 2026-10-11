@@ -66,6 +66,7 @@ def test_rerank_scored_auto_prefers_cross_encoder(monkeypatch):
             return [0.0, 5.0]
 
     monkeypatch.setattr(rag, "cross_encoder_available", lambda: True)
+    monkeypatch.setattr(rag, "cross_encoder_model_cached", lambda: True)  # "auto" only uses a model that is already on disk
     monkeypatch.setattr(rag, "_load_cross_encoder", lambda name: FakeCE())
     monkeypatch.setattr(
         rag,
@@ -84,6 +85,23 @@ def test_rerank_scored_auto_prefers_cross_encoder(monkeypatch):
     assert meta["applied"] is True
     assert meta["backend"] == "cross_encoder"
     assert items[0].evidence.identifier == "id-1"
+
+
+def test_rerank_scored_auto_does_not_download_a_cross_encoder(monkeypatch):
+    """v29 Phase5: with ``auto`` the first production query must not trigger a large model download - only a cached model
+    is used; otherwise the LLM backend answers. (An explicit ``cross_encoder`` backend still tries to load it.)"""
+    cands = [_ev(0, "a", "aa", 0.1), _ev(1, "b", "salt spray", 0.2)]
+    loaded: list[str] = []
+    monkeypatch.setattr(rag, "cross_encoder_available", lambda: True)
+    monkeypatch.setattr(rag, "cross_encoder_model_cached", lambda: False)
+    monkeypatch.setattr(rag, "_load_cross_encoder", lambda name: loaded.append(name))
+    monkeypatch.setattr(rag, "llm_rerank_scored", lambda *a, **k: ([], False))
+    monkeypatch.setattr(
+        "app.config.get_settings",
+        lambda: SimpleNamespace(cross_encoder_rerank_enabled=True, cross_encoder_model="fake/ce", search_rerank_backend="auto"),
+    )
+    _, meta = rag.rerank_scored("q", cands, k=2)
+    assert loaded == [] and meta["backend"] == "llm"
 
 
 def test_rerank_scored_falls_back_to_llm(monkeypatch):

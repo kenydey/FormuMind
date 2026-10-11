@@ -414,8 +414,10 @@ class TestScreenFormulationLocal:
         assert any("IP 预筛" in w for w in warns)
 
     def test_no_network_calls(self, monkeypatch):
-        """P3 core guarantee: optimisation loops never hit the network."""
-        from app.services.chemtools import screen_formulation_local
+        """P3 core guarantee: optimisation loops never hit the network - not even for the GHS explosive screen (P1-13),
+        which reads PubChem: from the cache only, unless the caller (the recommend path) allows a request."""
+        from app.services import chemtools
+        from app.services.chemtools import screen_formulation, screen_formulation_local
 
         called = {"n": 0}
 
@@ -423,12 +425,31 @@ class TestScreenFormulationLocal:
             called["n"] += 1
             raise AssertionError("network must not be called")
 
-        monkeypatch.setattr(
-            "app.services.chemtools.controlled_check", boom
-        )
+        chemtools.clear_cache()
+        monkeypatch.setattr(chemtools, "_pubchem_explosive", boom)
+        monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+        monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
         monkeypatch.setattr("app.services.chemtools.molbloom_available", lambda: False)
-        screen_formulation_local(self._form(smiles="CCO"))
+        form = self._form(smiles="CCO", cas_no="64-17-5")
+        screen_formulation_local(form)
         assert called["n"] == 0
+        # the recommend path may ask (fail-open: the screen is advisory) ...
+        screen_formulation(form)
+        assert called["n"] == 1
+
+    def test_a_cached_explosive_verdict_warns_inside_a_loop_without_a_request(self, monkeypatch):
+        from app.services import chemtools
+
+        chemtools.clear_cache()
+        monkeypatch.setattr(chemtools, "gateway_enabled", lambda: True)
+        monkeypatch.setattr(chemtools, "pubchem_available", lambda: True)
+        monkeypatch.setattr("app.services.chemtools.molbloom_available", lambda: False)
+        monkeypatch.setattr(chemtools, "_pubchem_explosive", lambda cas: True)
+        form = self._form(smiles="CCO", cas_no="64-17-5")
+        assert not any("爆炸性" in w for w in chemtools.screen_formulation_local(form))  # nothing cached yet
+        assert any("爆炸性" in w for w in chemtools.screen_formulation(form))  # the recommend path asks and caches
+        monkeypatch.setattr(chemtools, "_pubchem_explosive", lambda cas: (_ for _ in ()).throw(AssertionError("request")))
+        assert any("爆炸性" in w for w in chemtools.screen_formulation_local(form))  # the loop now sees it, for free
 
     def test_pains_interference_flagged(self):
         """P-B: benzil (1,2-diketone) is a known PAINS alert."""

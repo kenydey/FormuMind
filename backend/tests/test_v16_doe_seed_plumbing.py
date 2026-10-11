@@ -10,6 +10,7 @@
   active_learning_doe(seed) → baybe.recommend(seed) / legacy build_doe(seed)
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.api.doe import DoeCycleBody
@@ -49,7 +50,8 @@ def test_v16_run_optimization_passes_seed_plus_round_to_recommend():
     seen_seeds = []
 
     fake_result = MagicMock()
-    fake_result.plan = MagicMock(runs=[])  # 空 runs → 跳过打分内部循环
+    # one run per round, scored by the stubs below; an empty plan raises since G-2 (all runs skipped -> fallback chain)
+    fake_result.plan = MagicMock(runs=[MagicMock(natural={})])
     fake_result.campaign_state = "s"
     fake_result.lab_points_used = 0
 
@@ -66,6 +68,9 @@ def test_v16_run_optimization_passes_seed_plus_round_to_recommend():
         patch.object(be_mod, "objective_metrics", return_value=["salt_spray_h"]),
         patch.object(be_mod, "get_settings", return_value=settings),
         patch.object(be_mod, "_rank_by_pareto_then_score", return_value=[]),
+        patch.object(be_mod, "_score_and_validate", return_value=SimpleNamespace(predicted={"salt_spray_h": 1.0})),
+        patch.object(be_mod.reconstruct, "formulation_from_factors", return_value=object()),
+        patch.object(be_mod.predictor, "multi_objective_score", return_value=0.5),
         patch("app.db.campaign_store.get_campaign_store", return_value=MagicMock()),
         patch("app.services.doe_cycle_service.lab_measurement_source", return_value="lab"),
     ):
@@ -84,7 +89,7 @@ def test_v16_run_optimization_none_seed_stays_none():
     seen_seeds = []
 
     fake_result = MagicMock()
-    fake_result.plan = MagicMock(runs=[])
+    fake_result.plan = MagicMock(runs=[MagicMock(natural={})])
     fake_result.campaign_state = "s"
     fake_result.lab_points_used = 0
 
@@ -101,6 +106,9 @@ def test_v16_run_optimization_none_seed_stays_none():
         patch.object(be_mod, "objective_metrics", return_value=["salt_spray_h"]),
         patch.object(be_mod, "get_settings", return_value=settings),
         patch.object(be_mod, "_rank_by_pareto_then_score", return_value=[]),
+        patch.object(be_mod, "_score_and_validate", return_value=SimpleNamespace(predicted={"salt_spray_h": 1.0})),
+        patch.object(be_mod.reconstruct, "formulation_from_factors", return_value=object()),
+        patch.object(be_mod.predictor, "multi_objective_score", return_value=0.5),
         patch("app.db.campaign_store.get_campaign_store", return_value=MagicMock()),
         patch("app.services.doe_cycle_service.lab_measurement_source", return_value="lab"),
     ):

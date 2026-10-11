@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from enum import Enum
 
 from loguru import logger
@@ -67,6 +68,16 @@ def _token_set(text: str) -> set[str]:
         else:
             out.add(t)
     return out
+
+
+_FIGURE_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?")
+
+
+def _figures(text: str) -> set[str]:
+    """The numbers a text states, folded to one spelling (full-width digits, ``1,000``, ``0.50`` == ``0.5``)."""
+    src = unicodedata.normalize("NFKC", text or "")
+    src = re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", src)
+    return {f"{float(m):g}" for m in _FIGURE_RE.findall(src)}
 
 
 def extract_claims(text: str, *, max_claims: int | None = None) -> list[str]:
@@ -187,6 +198,28 @@ def verify_claim_offline(claim: str, evidence: list[Evidence]) -> VerifiedClaim:
 
     indices = [best_idx] if best_idx >= 0 else []
     tags = _source_tags_for_indices(evidence, indices)
+
+    # Word overlap alone cannot tell a claim from the report it was lifted from: with character pairs (D-1), the words
+    # of a product category - 水性 / 环氧 / 底漆 - are enough to reach the "supported" threshold for "HW-300 reaches 5000 h
+    # of salt spray" against a generic report that never mentions either figure. A claim's figures are its checkable
+    # content: none of them in the evidence -> unsupported; some -> at most "insufficient".
+    claim_figures = _figures(claim)
+    if claim_figures and best_score >= _WEAK_OVERLAP:
+        missing = claim_figures - set().union(*(_figures(f"{e.title} {e.snippet}") for e in evidence))
+        if missing == claim_figures:
+            return VerifiedClaim(
+                text=claim,
+                verdict=ClaimVerdict.unsupported,
+                reason=f"figures not in evidence: {', '.join(sorted(missing))}",
+            )
+        if missing and best_score >= _SUPPORTED_OVERLAP:
+            return VerifiedClaim(
+                text=claim,
+                verdict=ClaimVerdict.insufficient,
+                evidence_indices=indices,
+                source_tags=tags,
+                reason=f"token overlap {best_score:.2f}, but figures not in evidence: {', '.join(sorted(missing))}",
+            )
 
     if best_score >= _SUPPORTED_OVERLAP:
         return VerifiedClaim(

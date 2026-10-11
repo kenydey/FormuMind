@@ -136,8 +136,6 @@ class Settings(BaseSettings):
     recommend_default_n: int = 6
     recommend_max_n: int = 12
     recommend_diversity_enabled: bool = True
-    # 问答长上下文优化：证据数量上限（默认 10，可调至 20）
-    qa_max_evidence: int = 10
     recommend_diversity_lambda: float = 0.7
     recommend_tradeoff_enabled: bool = True
     recommend_uncertainty_flag: bool = True

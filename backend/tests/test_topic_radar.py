@@ -111,7 +111,14 @@ def test_enabled_without_a_usable_topic_schedules_nothing_and_says_so(caplog):
 def test_the_celery_app_carries_the_built_schedule():
     from app.worker.celery_app import celery_app
 
-    assert celery_app.conf.beat_schedule == build_beat_schedule(get_settings())
+    schedule = celery_app.conf.beat_schedule
+    built = build_beat_schedule(get_settings())
+    # the radar's own entries, unchanged ...
+    assert {k: v for k, v in schedule.items() if k in built} == built
+    # ... next to the two maintenance jobs celery_app adds (daily chunk-quality sample, weekly retrieval evaluation)
+    assert set(schedule) - set(built) == {"chunk-quality-daily", "retrieval-eval-weekly"}
+    for entry in schedule.values():
+        assert entry["task"] in celery_app.tasks, f"beat schedules {entry['task']!r}, which no worker registers"
 
 
 # ── the on-demand endpoint ───────────────────────────────────────────────────

@@ -302,6 +302,15 @@ def _claims_and_audit(
 #   3. P2-2 拒答门：触发时整体替换为拒答模板（硬门）。
 # v16: 同步与流式路径均调用此函数（旧注释"流式不经过"已过时）。
 
+def _answer_data_sources(hybrid_out: dict, sources: list) -> list[str]:
+    """Where an answer's material came from. ``hybrid_answer`` reports it truthfully - an empty list when it had neither SQL
+    rows nor a retrieved passage (P1-b) - so an empty list must stay empty: the old ``or ["kb_evidence"]`` turned it back
+    into a claim of grounding. Only when the hook did not run at all (no ``data_sources`` key) is it inferred from the sources."""
+    if "data_sources" in hybrid_out:
+        return list(hybrid_out["data_sources"] or [])
+    return ["kb_evidence"] if sources else []
+
+
 _ABSTAIN_TEMPLATE = (
     "证据不足，无法基于现有证据回答该问题。\n\n"
     "{reason}"
@@ -634,7 +643,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             prompt_prefix = (
                 f"{fused_block}\n\n{prompt_prefix}" if prompt_prefix else fused_block
             )
-        data_sources = list(hybrid_out.get("data_sources") or ["kb_evidence"])
+        data_sources = _answer_data_sources(hybrid_out, sources)
 
         if req.response_format == "structured" and settings.chat_structured_enabled:
             structured, struct_err, eff_sources = generate_structured_answer(
@@ -973,7 +982,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     fused_block = hybrid_out.get("fused_context") or ""
     if fused_block:
         prompt = f"{fused_block}\n\n{prompt}"
-    data_sources = list(hybrid_out.get("data_sources") or ["kb_evidence"])
+    data_sources = _answer_data_sources(hybrid_out, sources)
     try:
         from ..services.evidence_synthesis import enrich_chat_prompt
 

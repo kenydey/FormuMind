@@ -213,6 +213,9 @@ def _reset_rate_limits_before_test():
         # entry silently overrides a later test's ``monkeypatch.setattr(get_settings(), ...)``: test_mineru_cloud's
         # "SDK missing" case reported a missing token when it ran after test_v03.
         ("app.services.runtime_secrets", "reset_runtime_secrets"),
+        # The embedding-model breaker opens after five failed embeddings; without sentence-transformers every real ingest
+        # fails one, so by the time test_kb_index / test_v9_fixes ran their mocked ``_embed_texts`` the breaker skipped it.
+        ("app.services.kb_index", "reset_embed_breaker"),
     ):
         try:
             getattr(__import__(_mod, fromlist=[_fn]), _fn)()

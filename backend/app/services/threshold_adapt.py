@@ -9,6 +9,8 @@ import json
 import time
 from pathlib import Path
 
+from ._filelock import lock_exclusive, unlock
+
 
 # 默认阈值
 DEFAULT_THRESHOLDS = {
@@ -28,7 +30,7 @@ def _load_history(days: int = 30) -> list[dict]:
             return []
         cutoff = time.time() - days * 86400
         records = []
-        with open(_HISTORY_FILE) as f:
+        with open(_HISTORY_FILE, encoding="utf-8") as f:
             for line in f:
                 try:
                     r = json.loads(line)
@@ -44,7 +46,6 @@ def _load_history(days: int = 30) -> list[dict]:
 def record_feedback(query: str, precision: float, recall: float, threshold_used: dict) -> None:
     """记录一次查询的反馈（供后续自适应）。"""
     try:
-        import fcntl
         _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": time.time(),
@@ -53,13 +54,14 @@ def record_feedback(query: str, precision: float, recall: float, threshold_used:
             "recall": recall,
             "threshold": threshold_used,
         }
-        with open(_HISTORY_FILE, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        with open(_HISTORY_FILE, "a", encoding="utf-8") as f:
+            # ``fcntl`` does not exist on Windows: the import inside this try made every feedback record vanish there
+            lock_exclusive(f)
             try:
                 f.write(json.dumps(record) + "\n")
                 f.flush()
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                unlock(f)
     except Exception:
         pass
 

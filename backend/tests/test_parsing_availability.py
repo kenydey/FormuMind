@@ -254,11 +254,15 @@ def docx_with_table(tmp_path: Path) -> bytes:
     return path.read_bytes()
 
 
-def test_docx_tables_survive_the_markitdown_path(docx_with_table: bytes) -> None:
-    """The tables *are* the data in a formulation document."""
-    pytest.importorskip("mammoth")
+@pytest.mark.parametrize("tier", ["docx", "markitdown"])
+def test_docx_tables_survive_both_docx_paths(docx_with_table: bytes, tier: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tables *are* the data in a formulation document: the native walker (tried first, B-2) and, with it switched
+    off, the MarkItDown tier both keep them."""
+    if tier == "markitdown":
+        pytest.importorskip("mammoth")
+        monkeypatch.setattr(parsing, "_parse_docx", lambda content: None)
     result = parsing.parse_document(docx_with_table, "docx")
-    assert result.parser == "markitdown"
+    assert result.parser == tier
     assert "Zinc phosphate" in result.markdown
     assert "12.5" in result.markdown
 

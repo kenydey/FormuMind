@@ -2,7 +2,7 @@
 
 设计：
 - HTTP Range 请求分片下载（默认 1MB/片）。
-- 断点文件存 /tmp/resume_{hash}.part，记录已下载字节数。
+- 断点文件存系统临时目录下的 formumind_resume/resume_{hash}.part，记录已下载字节数。
 - 服务器不支持 Range 时回退整包下载。
 - 超时/中断后下次调用自动续传。
 - fail-open：续传失败时返回已下载部分（调用方决定是否使用）。
@@ -14,12 +14,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import tempfile
 import time
 
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 1024 * 1024  # 1MB
-_RESUME_DIR = "/tmp/formumind_resume"
+_RESUME_DIR = os.path.join(tempfile.gettempdir(), "formumind_resume")  # not a literal /tmp: Windows has none
 _MAX_RETRIES = 3
 
 
@@ -76,7 +77,9 @@ def download_resumable(url: str, *, timeout: float = 30.0,
                         logger.warning("resumable download HTTP %d for %s", status, url[:100])
                         return None
                     total = 0
-                    with open(part_path, mode) as f:
+                    if mode == "wb":
+                        open(part_path, "wb").close()  # start over (the server ignored Range / nothing downloaded yet)
+                    with open(part_path, "ab") as f:
                         for chunk in r.iter_bytes(chunk_size=_CHUNK_SIZE):
                             f.write(chunk)
                             total += len(chunk)
