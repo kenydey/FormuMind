@@ -789,11 +789,38 @@ def _persist_fulltext(
     v2 P0-6: ``pdf_bytes``/``tables`` — PDF tier 的原始字节与解析表格。
     落盘后：PDF 存 source_files/（下载端点可取），表格走 table sidecar，
     与本地上传路径同级。全部 fail-open，失败不影响文本入库。
+
+    2026-10-11 Phase 1 P0-1a: 有 pdf_bytes 时走 parse_document 全管线
+    （7-tier），用解析后的 markdown 替换传入 text，表格合并。
+    解析失败时 fail-open 回退原 text。
     """
     import time
 
     from ..db.source_store import get_source_store
     from .patent_ids import canonical_origin_url, normalize_patent_pub
+
+    # Phase 1 P0-1a: PDF 全管线解析 —— v2 决策②"一律走 parse_document 全管线"
+    if pdf_bytes:
+        try:
+            from .parsing import parse_document
+            parsed = parse_document(pdf_bytes, "pdf")
+            if parsed and (parsed.markdown or "").strip():
+                text = parsed.markdown
+                # 合并解析出的表格（去重：按内容哈希）
+                parsed_tables = getattr(parsed, "tables", None) or []
+                if parsed_tables:
+                    seen = set()
+                    merged = []
+                    for t in (tables or []) + parsed_tables:
+                        h = str(t)[:200]
+                        if h not in seen:
+                            seen.add(h)
+                            merged.append(t)
+                    tables = merged
+                logger.info("fulltext parse_document: %d chars, %d tables",
+                            len(text), len(tables or []))
+        except Exception as exc:
+            logger.warning("parse_document on fetched PDF failed, using raw text: %s", exc)
 
     content_hash = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
     origin = canonical_origin_url(
@@ -830,7 +857,7 @@ def _persist_fulltext(
 
                 # P1-8: index_source fail_soft 返回 0 不是成功 —— 必须重新
                 # 标记 failed，否则永久僵尸行（已标 indexed、零 chunk）。
-                if not index_source(failed_row.id, text) and kb_enabled():
+                if not index_source(failed_row.id, text, tables=tables) and kb_enabled():
                     try:
                         store.update_fields(
                             failed_row.id,
@@ -860,7 +887,7 @@ def _persist_fulltext(
             from .kb_index import index_source, kb_enabled
 
             # P1-8: 同上 —— 0 chunk 必须降级为 failed 供下次复活。
-            if not index_source(source_id, text) and kb_enabled():
+            if not index_source(source_id, text, tables=tables) and kb_enabled():
                 try:
                     store.update_fields(
                         source_id,

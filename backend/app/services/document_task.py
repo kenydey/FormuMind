@@ -67,20 +67,39 @@ def resolve_document(doc_type: str, identifier: str, *, timeout: float | None = 
             return _from_ingest("web", identifier, outcome, tier="web")
 
         text: str | None = None
+        pdf_bytes: bytes | None = None
+        tables: list | None = None
         tier = ""
         assert timeout is not None
         if doc_type == "patent":
             from .fulltext_fetcher import _fetch_patent_text
 
             _hit = _fetch_patent_text(_evidence_like(identifier.upper()), timeout=timeout)
+            # 2026-10-11 Phase 1 P0-1c: 透传完整 FetchedFulltext
             text = _hit.text if _hit else None
+            pdf_bytes = _hit.pdf_bytes if _hit else None
+            tables = _hit.tables if _hit else None
             tier = "dom"
         else:  # paper
             from .fulltext_fetcher import _fetch_literature_text
 
             _hit = _fetch_literature_text(_evidence_like(identifier), timeout=timeout)
             text = _hit.text if _hit else None
+            pdf_bytes = _hit.pdf_bytes if _hit else None
+            tables = _hit.tables if _hit else None
             tier = "full"
+
+        # 2026-10-11 Phase 1 P0-1a: 有 PDF 字节时走 parse_document 全管线
+        if pdf_bytes:
+            try:
+                from .parsing import parse_document
+                parsed = parse_document(pdf_bytes, "pdf")
+                if parsed and (parsed.markdown or "").strip():
+                    text = parsed.markdown
+                    if getattr(parsed, "tables", None):
+                        tables = (tables or []) + list(parsed.tables)
+            except Exception:
+                pass  # fail-open，用原 text
 
         if not text or not text.strip():
             raise ValueError("无法获取该标识符的全文(非 OA/被源站拒绝/解析为空)")

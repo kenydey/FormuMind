@@ -460,11 +460,14 @@ def _origin_lookup_keys(ev: Evidence) -> list[str]:
 def _fetch_one(
     ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *,
     allow_pdf: bool = True,
-) -> str | None:
+) -> tuple[str | None, bytes | None, list | None]:
     """Acquire one document's full text. Network-bound; safe to run in parallel.
 
-    Returns the text, or None when the document is already known (status
-    ``skipped``) or unobtainable (status ``failed``). Mutates *doc*.
+    Returns (text, pdf_bytes, tables), or (None, None, None) when the document
+    is already known (status ``skipped``) or unobtainable (status ``failed``).
+    Mutates *doc*.
+
+    2026-10-11 Phase 1 P0-1c: 返回完整 FetchedFulltext 三元组，不再只取 .text。
     """
     from ..db.source_store import get_source_store
     from . import fulltext_fetcher as ff
@@ -489,7 +492,7 @@ def _fetch_one(
                 source_id=existing.id,
             )
             emit(doc)
-            return None
+            return None, None, None
 
     # Content-filter blocklist: skip marketplace / junk landing URLs before fetch.
     try:
@@ -502,7 +505,7 @@ def _fetch_one(
                 error="blocked_domain",
             )
             emit(doc)
-            return None
+            return None, None, None
     except Exception as exc:
         degrade_return(logger, exc, "kb_ingest blocklist check failed", None)
 
@@ -513,12 +516,18 @@ def _fetch_one(
         with timing.span("fetch"):
             _hit = ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
             text = _hit.text if _hit else None
+            pdf_bytes = _hit.pdf_bytes if _hit else None
+            tables = _hit.tables if _hit else None
             doc["acquisition"] = ff._last_acquisition()
     except ff.FetchError as fe:
         text = None
+        pdf_bytes = None
+        tables = None
         fetch_reason = fe.reason
     except Exception as exc:
         text = degrade_return(logger, exc, f"kb_ingest fetch failed ({kind})", None)
+        pdf_bytes = None
+        tables = None
     # Recorded even when empty: "how much did the web channel actually return"
     # is the question, and a zero is as much of an answer as a large number.
     timing.note(chars=len(text or ""))
@@ -530,8 +539,8 @@ def _fetch_one(
         )
         doc.update(status="failed", error=error)
         emit(doc)
-        return None
-    return text
+        return None, None, None
+    return text, pdf_bytes, tables
 
 
 def _index_one(
@@ -542,6 +551,8 @@ def _index_one(
     doc: dict[str, Any],
     *,
     project_id: str | None = None,
+    pdf_bytes: bytes | None = None,
+    tables: list | None = None,
 ) -> None:
     """Chunk, embed and persist one document. Kept serial — SQLite writers."""
     from . import fulltext_fetcher as ff
@@ -552,6 +563,8 @@ def _index_one(
         text, ev, kind,
         project_id=project_id,
         acquisition=doc.get("acquisition"),
+        pdf_bytes=pdf_bytes,
+        tables=tables,
     )
     if source_id:
         doc.update(status="indexed", source_id=source_id)
@@ -692,7 +705,7 @@ def ingest_evidence_docs(
     # OCR) is what bounds the worker count on a small host — not the sockets.
     workers = max(1, int(getattr(settings, "kb_ingest_workers", 3)))
 
-    def _fetch(i: int) -> tuple[int, str | None]:
+    def _fetch(i: int) -> tuple[int, tuple[str | None, bytes | None, list | None]]:
         ev, kind = targets[i]
         try:
             # `track` spans threads: this runs in a worker, the matching index
@@ -702,14 +715,16 @@ def ingest_evidence_docs(
         except Exception as exc:
             degrade_return(logger, exc, "kb_ingest fetch failed", None)
             docs[i].update(status="failed", error=str(exc)[:200])
-            return i, None
+            return i, (None, None, None)
 
-    def _index(i: int, text: str | None) -> None:
+    def _index(i: int, fetched: tuple[str | None, bytes | None, list | None]) -> None:
         ev, kind = targets[i]
+        text, pdf_bytes, tables = fetched
         if text:
             try:
                 with timing.track(ev.identifier or "", kind):
-                    _index_one(text, ev, kind, emit, docs[i], project_id=project_id)
+                    _index_one(text, ev, kind, emit, docs[i], project_id=project_id,
+                               pdf_bytes=pdf_bytes, tables=tables)
             except Exception as exc:  # one bad document must not kill the queue
                 degrade_return(logger, exc, "kb_ingest document failed", None)
                 docs[i].update(status="failed", error=str(exc)[:200])

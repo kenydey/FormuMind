@@ -684,8 +684,34 @@ def prepare_chunk_rows(
     return rows if rows else None
 
 
+def _tables_to_markdown(tables: list) -> str:
+    """Phase 1 P0-1b: TableAsset 列表转 GFM markdown（fail-open）。"""
+    parts = []
+    for i, t in enumerate(tables):
+        try:
+            # TableAsset: 尝试取 markdown / rows / data
+            md = getattr(t, "markdown", None)
+            if md:
+                parts.append(f"\n\n### 表 {i+1}\n\n{md}")
+                continue
+            rows = getattr(t, "rows", None) or getattr(t, "data", None)
+            if rows and isinstance(rows, list) and len(rows) > 0:
+                header = rows[0]
+                lines = ["\n\n### 表 {0}\n".format(i+1)]
+                lines.append("| " + " | ".join(str(c) for c in header) + " |")
+                lines.append("| " + " | ".join("---" for _ in header) + " |")
+                for r in rows[1:]:
+                    if isinstance(r, (list, tuple)):
+                        lines.append("| " + " | ".join(str(c) for c in r) + " |")
+                parts.append("\n".join(lines))
+        except Exception:
+            continue
+    return "\n".join(parts)
+
+
 def index_source(
-    source_id: str, full_text: str, *, embed: bool = True, fail_soft: bool = True
+    source_id: str, full_text: str, *, embed: bool = True, fail_soft: bool = True,
+    tables: list | None = None,
 ) -> int:
     """(Re)chunk one source document into persistent KB rows.
 
@@ -695,7 +721,18 @@ def index_source(
     callers that treat the SourceDocument as the primary artifact. Pass
     ``fail_soft=False`` from ingest paths that create the SourceDocument in the
     same request so a hard failure can roll back the orphan row.
+
+    2026-10-11 Phase 1 P0-1b: ``tables`` — TableAsset 列表，转 markdown 后
+    追加到文本参与 chunking（确保表格内容可检索）。
     """
+    # Phase 1 P0-1b: 表格转 markdown 注入
+    if tables:
+        try:
+            table_md = _tables_to_markdown(tables)
+            if table_md:
+                full_text = (full_text or "") + "\n\n" + table_md
+        except Exception:
+            pass
     if not kb_enabled() or not (full_text or "").strip():
         return 0
     try:

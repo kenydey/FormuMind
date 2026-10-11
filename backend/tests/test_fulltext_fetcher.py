@@ -308,7 +308,7 @@ def test_persist_fulltext_retries_on_db_locked(monkeypatch):
             return "src-1"
 
     monkeypatch.setattr("app.db.source_store.get_source_store", lambda: FakeStore())
-    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text: 1)
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text, **kw: 1)
 
     ev = Evidence(source="USPTO", identifier="US1", title="t", snippet="s", relevance=0.9)
     result = ff._persist_fulltext("some full text " * 50, ev, "patent")
@@ -329,7 +329,7 @@ def test_persist_forces_patent_kind_for_pub_id(monkeypatch):
             return "sid-1"
 
     monkeypatch.setattr("app.db.source_store.get_source_store", lambda: FakeStore())
-    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text: 1)
+    monkeypatch.setattr("app.services.kb_index.index_source", lambda sid, text, **kw: 1)
 
     ev = Evidence(
         source="internet",

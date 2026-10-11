@@ -76,29 +76,37 @@ class ParseResult:
 
 
 def _maybe_extract_embedded_structures(result: ParseResult, content: bytes) -> ParseResult:
-    """v2 P1-9: embedded_images() 接线 —— PDF 内嵌结构图 → vision → SMILES 入库。
+    """v2 P1-9: embedded_images() 接线 —— PDF 内嵌结构图 → SMILES 入库。
 
-    开关 ``pdf_embedded_image_vision``（默认关：vision 调用有成本，需显式开启）。
-    每页内嵌图 → vision_extract.extract_image → 分子结构表以页码标记追加到
-    markdown，后续 chunking 正常入库检索。全部 fail-open。
+    2026-10-11 Phase 1 P1-3: 先走本地 OCSR（免费离线，硬件自适应），
+    失败/低置信度时再走 vision LLM 兜底。
+    开关 ``pdf_embedded_image_vision``（默认关）仅控制 vision 兜底；
+    本地 OCSR 不受此开关限制（零 token 成本）。
+    每页内嵌图 → OCSR/vision → 分子结构表以页码标记追加到 markdown，
+    后续 chunking 正常入库检索。全部 fail-open。
     """
     try:
         from ..config import get_settings
 
-        if not bool(getattr(get_settings(), "pdf_embedded_image_vision", False)):
-            return result
+        settings = get_settings()
+        vision_allowed = bool(getattr(settings, "pdf_embedded_image_vision", False))
+        ocsr_enabled = bool(getattr(settings, "ocsr_enabled", True))
         from . import pdf_local
-        from .vision_extract import extract_image, image_markdown, vision_available
     except Exception:
         return result
+    # 本地 OCSR 和 vision 兜底都不可用时直接返回
+    if not ocsr_enabled and not vision_allowed:
+        return result
     try:
-        can_see, _hint = vision_available()
-        if not can_see:
-            return result
+        if vision_allowed:
+            from .vision_extract import extract_image, image_markdown, vision_available
+            can_see, _hint = vision_available()
+            if not can_see:
+                vision_allowed = False
         n_pages = pdf_local.page_count(content)
     except Exception:
         return result
-    max_figs = 10  # 成本护栏：每篇最多 10 张图走 vision
+    max_figs = 10  # 成本护栏：每篇最多 10 张图
     done = 0
     extra: list[str] = []
     for page_no in range(1, n_pages + 1):
@@ -114,6 +122,30 @@ def _maybe_extract_embedded_structures(result: ParseResult, content: bytes) -> P
             if not img or len(img) < 5120:  # <5KB 多为图标/装饰，跳过
                 continue
             done += 1
+            # Phase 1 P1-3: 先本地 OCSR（免费），失败再 vision 兜底
+            smiles = None
+            if ocsr_enabled:
+                try:
+                    import tempfile
+                    from .ocsr import predict_smiles_local
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                        tmp.write(img)
+                        tmp_path = tmp.name
+                    try:
+                        smiles = predict_smiles_local(tmp_path)
+                    finally:
+                        import os
+                        os.unlink(tmp_path)
+                except Exception:
+                    smiles = None
+            if smiles:
+                extra.append(
+                    f"<!-- page:{page_no} -->\n\n**结构图 p{page_no}-fig{i}** (OCSR): `{smiles}`"
+                )
+                continue
+            # vision 兜底（需开关开启）
+            if not vision_allowed:
+                continue
             try:
                 extraction, _err = extract_image(img, f"p{page_no}-fig{i}.png")
             except Exception:

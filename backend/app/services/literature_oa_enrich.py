@@ -143,14 +143,17 @@ def enrich_manifest_oa(
         it, ev, kind = job
         try:
             _hit = _ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            # 2026-10-11 Phase 1 P0-1c: 透传完整 FetchedFulltext，不再只取 .text
             text = _hit.text if _hit else None
+            pdf_bytes = _hit.pdf_bytes if _hit else None
+            tables = _hit.tables if _hit else None
             acquisition = _ff._last_acquisition()
         except Exception as exc:  # noqa: BLE001
             logger.debug("OA enrich fetch failed %s: %s", it.get("id"), exc)
-            return (it, ev, kind, None, None, f"error:{str(exc)[:100]}")
+            return (it, ev, kind, None, None, None, None, f"error:{str(exc)[:100]}")
         if not text:
-            return (it, ev, kind, None, None, "no_oa|fetch_failed")
-        return (it, ev, kind, text, acquisition, None)
+            return (it, ev, kind, None, None, None, None, "no_oa|fetch_failed")
+        return (it, ev, kind, text, pdf_bytes, tables, acquisition, None)
 
     fetched_jobs: list[tuple] = []
     if jobs:
@@ -161,7 +164,7 @@ def enrich_manifest_oa(
 
     # Single-threaded aggregation: SQLite writes (persist + embedding index)
     # are serialized here; the worker threads above never touch the DB.
-    for it, ev, kind, text, acquisition, err in fetched_jobs:
+    for it, ev, kind, text, pdf_bytes, tables, acquisition, err in fetched_jobs:
         if err is not None:
             skipped += 1
             it["enrich_status"] = "failed"
@@ -177,7 +180,8 @@ def enrich_manifest_oa(
             continue
         try:
             source_id = _ff._persist_fulltext(
-                text, ev, kind, project_id=project_id, acquisition=acquisition
+                text, ev, kind, project_id=project_id, acquisition=acquisition,
+                pdf_bytes=pdf_bytes, tables=tables,
             )
         except Exception as exc:  # noqa: BLE001 — _persist_fulltext is fail-open itself
             logger.debug("OA enrich persist failed %s: %s", it.get("id"), exc)

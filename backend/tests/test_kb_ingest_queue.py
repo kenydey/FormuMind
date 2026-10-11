@@ -333,9 +333,9 @@ def test_fetches_run_concurrently_but_indexing_stays_serial(monkeypatch):
         # 加短 sleep 确保并行可观测（真实 fetch 有网络 IO 更慢）。
         time.sleep(0.02)
         fetch_threads.add(threading.get_ident())
-        return "全文内容"
+        return ("全文内容", None, None)
 
-    def fake_index(text, ev, kind, emit, doc, project_id=None):
+    def fake_index(text, ev, kind, emit, doc, project_id=None, **kw):
         index_threads.add(threading.get_ident())
         with index_lock:
             inside["n"] += 1
@@ -359,10 +359,10 @@ def test_a_single_worker_still_works(monkeypatch):
     monkeypatch.setattr(get_settings(), "kb_ingest_max_docs", 0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_workers", 1, raising=False)
-    monkeypatch.setattr(kb_ingest, "_fetch_one", lambda *a, **k: "全文")
+    monkeypatch.setattr(kb_ingest, "_fetch_one", lambda *a, **k: ("全文", None, None))
     monkeypatch.setattr(
         kb_ingest, "_index_one",
-        lambda text, ev, kind, emit, doc, project_id=None: doc.update(
+        lambda text, ev, kind, emit, doc, project_id=None, **kw: doc.update(
             status="indexed", source_id="s"
         ),
     )
@@ -377,12 +377,12 @@ def test_one_failing_fetch_does_not_stop_the_queue(monkeypatch):
     def flaky(ev, kind, timeout, emit, doc, allow_pdf=True):
         if ev.identifier.endswith("00002A"):
             raise RuntimeError("network exploded")
-        return "全文"
+        return ("全文", None, None)
 
     monkeypatch.setattr(kb_ingest, "_fetch_one", flaky)
     monkeypatch.setattr(
         kb_ingest, "_index_one",
-        lambda text, ev, kind, emit, doc, project_id=None: doc.update(
+        lambda text, ev, kind, emit, doc, project_id=None, **kw: doc.update(
             status="indexed", source_id="s"
         ),
     )
@@ -402,7 +402,7 @@ def test_the_whole_queue_is_announced_before_any_fetch(monkeypatch):
 
     def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
         fetched.append(ev.identifier)
-        return None
+        return (None, None, None)
 
     monkeypatch.setattr(kb_ingest, "_fetch_one", fake_fetch)
     kb_ingest.ingest_evidence_docs(
