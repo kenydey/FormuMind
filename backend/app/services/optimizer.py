@@ -49,6 +49,21 @@ class _ObservedHistoryMixin:
         order = np.argsort(self._y)[::-1][:top_n]
         return [(self._X[i], self._y[i]) for i in order]
 
+    def should_stop_early(self, patience: int = 5, min_delta: float = 1e-4) -> bool:
+        """早停检查：连续 patience 轮无显著提升时返回 True。
+
+        用于节约实验成本。fail-open：数据不足时返回 False。
+        """
+        try:
+            if len(self._y) < patience + 1:
+                return False
+            # 比较最近 patience 轮的最佳 vs 之前最佳
+            prev_best = max(self._y[:-patience])
+            recent_best = max(self._y[-patience:])
+            return (recent_best - prev_best) < min_delta
+        except Exception:
+            return False
+
 
 @dataclass
 class Factor:

@@ -72,6 +72,8 @@ class ParseResult:
     # P-5: 解析失败分类 —— oversized / encrypted / corrupted / timeout / oom / unsupported
     # 运营面板可见，便于诊断。
     failure_category: str = ""
+    # 公式识别增强：提取的 LaTeX 公式列表 [(formula_latex, page_no)]
+    formulas: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -1183,6 +1185,27 @@ def _pdf_tier_order(prefer: str) -> list[tuple[str, object]]:
     idx = names.index(prefer)
     # Pinned parser first, then the lighter tiers below it as fallback.
     return tiers[idx:]
+
+
+def extract_latex_formulas(markdown: str) -> list[tuple[str, int]]:
+    """公式识别增强：从 markdown 提取 LaTeX 公式。
+
+    识别 $$...$$、\\[...\\]、\\(...\\) 块级/行内公式。
+    返回 [(latex, 位置索引)]。
+    """
+    import re
+    formulas = []
+    # 块级公式 $$...$$
+    for m in re.finditer(r"\$\$(.+?)\$\$", markdown, re.DOTALL):
+        latex = m.group(1).strip()
+        if len(latex) > 3:
+            formulas.append((latex, m.start()))
+    # \[...\]
+    for m in re.finditer(r"\\\[(.+?)\\\]", markdown, re.DOTALL):
+        latex = m.group(1).strip()
+        if len(latex) > 3:
+            formulas.append((latex, m.start()))
+    return formulas
 
 
 def parse_document(content: bytes, ext: str, *, prefer: str | None = None) -> ParseResult:

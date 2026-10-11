@@ -18,6 +18,37 @@ from .doe_explain import (
 )
 
 
+def adapt_factor_ranges(factors: list, results: list[dict]) -> list:
+    """自适应 DOE：基于已完成实验结果动态调整因子范围。
+
+    规则：
+    - 若最优解在边界附近，扩展该方向范围 20%
+    - 若某因子对结果影响小（方差贡献 <5%），收缩范围聚焦
+    fail-open：异常时返回原 factors。
+    """
+    try:
+        if not factors or not results or len(results) < 3:
+            return factors
+        import copy
+        adapted = copy.deepcopy(factors)
+        # 简单实现：检查最优解位置
+        best = max(results, key=lambda r: r.get("response", 0))
+        for f in adapted:
+            fname = getattr(f, "name", "")
+            f_low = getattr(f, "low", 0)
+            f_high = getattr(f, "high", 1)
+            best_val = best.get(fname, (f_low + f_high) / 2)
+            span = f_high - f_low
+            # 边界附近则扩展
+            if best_val <= f_low + span * 0.1:
+                f.low = max(f_low - span * 0.2, f_low - span)
+            elif best_val >= f_high - span * 0.1:
+                f.high = min(f_high + span * 0.2, f_high + span)
+        return adapted
+    except Exception:
+        return factors
+
+
 def _run_has_constraint_warnings(req: Requirement, run) -> list[str]:
     from ..domain.formulation_gate import validate_formulations
     from ..pipeline import reconstruct

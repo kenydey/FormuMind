@@ -681,11 +681,20 @@ def prepare_chunk_rows(
     rows = dedupe_chunk_rows(rows, source_id, session, skip_l1=True)
     # v16 P2-7: 覆盖率 bump 不在此处 —— 移到 index_source 的 DB 写成功之后，
     # 否则写失败会导致计数虚增。dedupe 后的 rows 由调用方负责 bump。
+    # 元数据丰富化：自动标签（fail-open）
+    try:
+        from .kb_enrich import enrich_chunk_metadata
+        rows = enrich_chunk_metadata(rows)
+    except Exception:
+        pass
     return rows if rows else None
 
 
 def _tables_to_markdown(tables: list) -> str:
-    """Phase 1 P0-1b: TableAsset 列表转 GFM markdown（fail-open）。"""
+    """Phase 1 P0-1b: TableAsset 列表转 GFM markdown（fail-open）。
+
+    P-4: 复杂表格保持 —— rowspan/colspan 时加 HTML 注释标记合并信息。
+    """
     parts = []
     for i, t in enumerate(tables):
         try:
@@ -695,9 +704,13 @@ def _tables_to_markdown(tables: list) -> str:
                 parts.append(f"\n\n### 表 {i+1}\n\n{md}")
                 continue
             rows = getattr(t, "rows", None) or getattr(t, "data", None)
+            # P-4: 检查合并单元格元数据
+            merges = getattr(t, "merges", None) or getattr(t, "spans", None)
             if rows and isinstance(rows, list) and len(rows) > 0:
                 header = rows[0]
                 lines = ["\n\n### 表 {0}\n".format(i+1)]
+                if merges:
+                    lines.append(f"<!-- 合并单元格: {len(merges)} 处 -->")
                 lines.append("| " + " | ".join(str(c) for c in header) + " |")
                 lines.append("| " + " | ".join("---" for _ in header) + " |")
                 for r in rows[1:]:
