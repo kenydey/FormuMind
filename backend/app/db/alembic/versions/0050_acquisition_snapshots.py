@@ -21,6 +21,11 @@ _TABLE = "acquisition_snapshots"
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table(_TABLE):
+        # 0001_baseline 已用 create_all 从当前 models 建好该表（全新库），幂等跳过；
+        # 既有库（0001 早于该表加入）则正常补建。
+        return
     op.create_table(
         _TABLE,
         sa.Column("id", sa.String(32), primary_key=True),
