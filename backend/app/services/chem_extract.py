@@ -259,7 +259,15 @@ KNOWN_BRANDS: tuple[str, ...] = (
 
 _TM_NAME_RE = re.compile(r"\b([A-Z][A-Za-z]{2,20})\s?[®™]")
 _BRAND_GRADE_RE = re.compile(
-    r"\b([A-Z][A-Za-z]{1,15}(?:-[A-Za-z]{1,10})?)\s?[®™]?[-–—\s]\s?(\d{2,5}(?:[A-Z]{1,3}|[A-Z]?\d{0,2}))\b"
+    r"\b([A-Z][A-Za-z]{1,15}(?:-[A-Za-z]{1,10})?)\s?[®™]?[-–—\s]\s?([A-Z]?-?\d{2,5}(?:[A-Z]{1,3}|[A-Z]?\d{0,2}))\b"
+)
+# 字母牌号：品牌 + 1-2 大写字母 + 空格 + 数字（如 Desmodur N 3300 → N）
+_BRAND_LETTER_GRADE_RE = re.compile(
+    r"\b([A-Z][A-Za-z]{1,15})\s+([A-Z]{1,2})\s+\d{2,5}\b"
+)
+# 单词牌号：品牌 + 首字母大写单词 + 数字（如 Tego Foamex 810 → Foamex）
+_BRAND_WORD_GRADE_RE = re.compile(
+    r"\b([A-Z][A-Za-z]{1,15})\s+([A-Z][a-z]{2,15})\s+\d{2,5}\b"
 )
 _GRADE_STOP_PREFIX = {
     "table", "figure", "fig", "example", "examples", "claim", "claims",
@@ -326,6 +334,33 @@ def extract_products(text: str) -> list[dict]:
         )
         if known_brand or has_context:
             add(brand, grade, supplier)
+
+    # 2b) 字母牌号：品牌 + 大写字母 + 数字（如 Desmodur N 3300）
+    for m in _BRAND_LETTER_GRADE_RE.finditer(text):
+        brand, grade = m.group(1), m.group(2)
+        if brand.lower() in _GRADE_STOP_PREFIX:
+            continue
+        known_brand = brand.lower() in KNOWN_BRANDS
+        supplier = _nearby_supplier(text, m.start(), m.end())
+        has_context = bool(
+            supplier
+            or _SUPPLIER_CONTEXT_RE.search(
+                text[max(0, m.start() - 90): min(len(text), m.end() + 90)]
+            )
+        )
+        if known_brand or has_context:
+            add(brand, grade, supplier)
+
+    # 2c) 单词牌号：品牌 + 单词 + 数字（如 Tego Foamex 810）
+    for m in _BRAND_WORD_GRADE_RE.finditer(text):
+        brand, grade = m.group(1), m.group(2)
+        if brand.lower() in _GRADE_STOP_PREFIX:
+            continue
+        # 单词牌号必须品牌在白名单（避免误报普通短语）
+        if brand.lower() not in KNOWN_BRANDS:
+            continue
+        supplier = _nearby_supplier(text, m.start(), m.end())
+        add(brand, grade, supplier)
 
     return out
 
