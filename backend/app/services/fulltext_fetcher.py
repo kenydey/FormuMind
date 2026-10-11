@@ -1019,6 +1019,16 @@ def enrich_search_results(
         if kind:
             report.record(kind, False)
             # 下载失败（无 OA / 403 / 超时 / 解析为空）→ 移除，不进结果/左栏。
+            # P0-1: 失败入重试队列（指数退避 ×3），fail-open。
+            try:
+                from ..worker.tasks import enqueue_fulltext_retry
+                enqueue_fulltext_retry(
+                    ev.identifier, ev.source, kind,
+                    project_id=project_id, title=ev.title,
+                    url=getattr(ev, "url", None),
+                )
+            except Exception:
+                pass
             continue
         out.append(ev)
 

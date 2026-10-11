@@ -1986,3 +1986,83 @@ def dispatch_screening_job(
         return async_result.id
     except Exception as exc:
         return degrade_return(logger, exc, "screening dispatch failed", None)
+
+
+# ── P0-1: 全文下载失败重试队列（2026-10-11）─────────────────────────────
+# 指数退避：60s → 300s → 900s，最多 3 次。成功后走正常 persist 流程。
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    name="formumind.fulltext_retry",
+)
+def retry_fulltext_fetch(self, payload: dict) -> dict:
+    """重试一次失败的全文下载。
+
+    payload: {"identifier": str, "source": str, "kind": str,
+              "project_id": str|None, "title": str|None, "url": str|None}
+    """
+    from ..domain.schemas import Evidence
+    from ..services import fulltext_fetcher as ff
+
+    identifier = payload.get("identifier", "")
+    kind = payload.get("kind", "")
+    logger.info(
+        "fulltext_retry attempt %d/%d for %s",
+        self.request.retries + 1, 3, identifier,
+    )
+    try:
+        ev = Evidence(
+            source=payload.get("source", ""),
+            identifier=identifier,
+            title=payload.get("title") or identifier,
+            snippet="",
+            relevance=0.9,
+            url=payload.get("url"),
+        )
+        hit = ff._dispatch_fetch(kind, ev, timeout=30.0, allow_pdf=True)
+        if not hit or not (hit.text or "").strip():
+            raise RuntimeError("retry fetch returned empty")
+        source_id = ff._persist_fulltext(
+            hit.text, ev, kind,
+            project_id=payload.get("project_id"),
+            acquisition=ff._last_acquisition(),
+            pdf_bytes=hit.pdf_bytes,
+            tables=hit.tables,
+        )
+        return {"ok": True, "source_id": source_id, "identifier": identifier}
+    except Exception as exc:
+        # 指数退避：60s, 300s, 900s
+        countdown = [60, 300, 900][min(self.request.retries, 2)]
+        logger.warning(
+            "fulltext_retry failed for %s (attempt %d): %s — retry in %ds",
+            identifier, self.request.retries + 1, exc, countdown,
+        )
+        try:
+            raise self.retry(exc=exc, countdown=countdown)
+        except Exception:
+            # max_retries 耗尽
+            logger.error("fulltext_retry exhausted for %s: %s", identifier, exc)
+            return {"ok": False, "identifier": identifier, "error": str(exc)[:200]}
+
+
+def enqueue_fulltext_retry(
+    identifier: str, source: str, kind: str,
+    project_id: str | None = None, title: str | None = None,
+    url: str | None = None,
+) -> str | None:
+    """下载失败时入重试队列。返回 task id，失败时返回 None（fail-open）。"""
+    try:
+        from ..config import get_settings
+        if get_settings().celery_eager:
+            # eager 模式下直接同步重试一次（避免测试/单机环境堆积）
+            return None
+        payload = {
+            "identifier": identifier, "source": source, "kind": kind,
+            "project_id": project_id, "title": title, "url": url,
+        }
+        result = retry_fulltext_fetch.delay(payload)
+        logger.info("fulltext_retry enqueued for %s: %s", identifier, result.id)
+        return result.id
+    except Exception as exc:
+        logger.warning("enqueue_fulltext_retry failed (fail-open): %s", exc)
+        return None
