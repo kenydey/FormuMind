@@ -94,18 +94,36 @@ _BACKGROUND_THREAD_PREFIXES = ("eager-", "wiki-compile", "workbench-loop")
 _BACKGROUND_DRAIN_TIMEOUT_S = 60.0
 
 
-@pytest.fixture(autouse=True)
-def _home_files_are_not_the_real_ones(tmp_path_factory, monkeypatch):
+@pytest.fixture(autouse=True, scope="session")
+def _home_files_are_not_the_real_ones(tmp_path_factory):
     """Two services keep feedback logs under ``~/.formumind`` (A/B tracking of recommendations, retrieval-threshold feedback).
     Tests that ran the recommend pipeline appended to the developer's real files, and ``test_ab_tracking`` ("no data -> not
-    sufficient") then failed on any machine that had ever run the suite. Each test gets its own empty files."""
+    sufficient") then failed on any machine that had ever run the suite.
+
+    Redirected for the whole session and never restored: the recommend pipeline writes from a background thread, which the
+    per-test drain waits for *after* a function-scoped patch would already have been undone - the write then went to the real
+    file again (seen: the file reappeared during the confirming run).
+    """
     folder = tmp_path_factory.mktemp("formumind-home")
     try:
         from app.services import recommend_ab_track, threshold_adapt
 
-        monkeypatch.setattr(recommend_ab_track, "_TRACK_FILE", folder / "recommend_ab_tracking.jsonl")
-        monkeypatch.setattr(threshold_adapt, "_HISTORY_FILE", folder / "threshold_history.jsonl")
+        recommend_ab_track._TRACK_FILE = folder / "recommend_ab_tracking.jsonl"
+        threshold_adapt._HISTORY_FILE = folder / "threshold_history.jsonl"
     except Exception:  # noqa: BLE001 - a module that cannot be imported has no file to protect
+        return
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _empty_home_files():
+    """Every test starts without feedback records (the session fixture only moves the files)."""
+    try:
+        from app.services import recommend_ab_track, threshold_adapt
+
+        for path in (recommend_ab_track._TRACK_FILE, threshold_adapt._HISTORY_FILE):
+            path.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
         pass
     yield
 
