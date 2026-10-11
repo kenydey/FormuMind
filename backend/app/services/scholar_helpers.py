@@ -89,7 +89,8 @@ def verify_dois(
             with make_client(timeout=timeout_s, follow_redirects=True) as client:
                 resp = client.get(
                     url,
-                    headers={"User-Agent": "FormuMind/1.0 (mailto:formumind@example.com)"},
+                    # 2026-10-11：不硬编码占位邮箱；Crossref 仍可用，仅无 polite pool 优待。
+                    headers={"User-Agent": "FormuMind/1.0"},
                 )
             if resp.status_code == 404:
                 row["status"] = "not_found"
@@ -143,7 +144,8 @@ def annotate_answer_dois(answer: str, *, enabled: bool = True) -> tuple[str, lis
 
 
 def _openalex_headers() -> dict[str, str]:
-    mailto = "formumind@example.com"
+    # 2026-10-11：未配置时不带 mailto（不硬编码占位邮箱）。
+    mailto = ""
     try:
         from ..config import get_settings
         from .runtime_secrets import effective_setting
@@ -153,7 +155,8 @@ def _openalex_headers() -> dict[str, str]:
             mailto = str(m)
     except Exception:  # noqa: BLE001
         pass
-    return {"User-Agent": f"FormuMind/1.0 (mailto:{mailto})"}
+    ua = f"FormuMind/1.0 (mailto:{mailto})" if mailto else "FormuMind/1.0"
+    return {"User-Agent": ua}
 
 
 def _openalex_get(url: str, *, timeout_s: float = 6.0) -> dict[str, Any] | None:

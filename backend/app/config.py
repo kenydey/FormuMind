@@ -271,7 +271,8 @@ class Settings(BaseSettings):
     # Polite-pool contact for OpenAlex. Default is a non-personal placeholder —
     # set FORMUMIND_OPENALEX_MAILTO to a real address you control (shared
     # personal defaults caused 429s when many deployments reused one mailbox).
-    openalex_mailto: str | None = "formumind@example.com"
+    # 2026-10-11：默认 None，经设置界面/API 配置，不硬编码占位邮箱。
+    openalex_mailto: str | None = None
     # ── OpenAlex 多臂检索（2026-09-11）──────────────────────────────────────
     # OpenAlex 把空格分隔的词按 AND 连接并做词干化，而查询串由 LLM 扩展生成、
     # 长度每次不同 —— 实测同一主题的召回在 1 条到几千条之间抽奖（「铝合金碱性
@@ -302,7 +303,8 @@ class Settings(BaseSettings):
     # 而 OpenAlex 的文件由自己托管。缺 key 时该档自动跳过，行为与从前一致。
     openalex_api_key: str | None = None
     openalex_content_enabled: bool = True
-    unpaywall_mailto: str | None = "formumind@example.com"  # Unpaywall polite-pool email
+    # 2026-10-11：默认 None，经设置界面/API 配置，不硬编码占位邮箱。
+    unpaywall_mailto: str | None = None  # Unpaywall polite-pool email
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
 

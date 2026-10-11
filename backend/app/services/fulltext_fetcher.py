@@ -219,12 +219,14 @@ def _resolve_oa_candidates(ev: Evidence, timeout: float) -> tuple[list[str], lis
         return [], []
     doi = m.group(1).rstrip(".,;)")
     settings = get_settings()
-    mailto = settings.openalex_mailto or "formumind@example.com"
+    # 2026-10-11：mailto 未配置时不带该参数（OpenAlex 仍可用，仅无 polite pool 优待）。
+    mailto = settings.openalex_mailto or ""
+    mailto_qs = f"?mailto={mailto}" if mailto else ""
     pdfs: list[str] = []
     landings: list[str] = []
     try:
         with make_client(timeout=timeout, headers=_HEADERS) as client:
-            r = client.get(f"https://api.openalex.org/works/doi:{doi}?mailto={mailto}")
+            r = client.get(f"https://api.openalex.org/works/doi:{doi}{mailto_qs}")
         if r.status_code == 200:
             data = r.json()
             loc = data.get("best_oa_location") or {}
