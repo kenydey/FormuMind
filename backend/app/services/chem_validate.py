@@ -14,19 +14,35 @@ logger = logging.getLogger(__name__)
 
 # N-3: 不兼容对规则库（成分名关键词，大小写不敏感）
 # 格式：(关键词A, 关键词B, 原因)
+# O-2: 从 6 对扩展到 20 对，覆盖常见涂料不兼容组合
 INCOMPATIBLE_PAIRS: tuple[tuple[str, str, str], ...] = (
+    # 强酸 + 强碱/活泼金属
     ("硫酸", "氢氧化钠", "强酸+强碱剧烈放热"),
     ("sulfuric acid", "sodium hydroxide", "strong acid + strong base"),
+    ("盐酸", "氢氧化钠", "强酸+强碱放热"),
+    ("hydrochloric acid", "sodium hydroxide", "acid + base exothermic"),
+    # 氧化剂 + 易燃物/有机物
     ("硝酸", "乙醇", "氧化剂+易燃物"),
     ("nitric acid", "ethanol", "oxidizer + flammable"),
     ("过氧化氢", "丙酮", "氧化剂+有机物"),
     ("hydrogen peroxide", "acetone", "oxidizer + organic"),
+    ("高锰酸钾", "甘油", "强氧化剂+有机物可自燃"),
+    ("potassium permanganate", "glycerol", "oxidizer + organic spontaneous"),
+    # 产气反应
     ("盐酸", "次氯酸钠", "产生氯气"),
     ("hydrochloric acid", "sodium hypochlorite", "chlorine gas"),
     ("氨水", "次氯酸钠", "产生氯胺"),
     ("ammonia", "sodium hypochlorite", "chloramine"),
+    ("碳酸钙", "盐酸", "产生 CO2（除非有意）"),
+    ("calcium carbonate", "hydrochloric acid", "CO2 release"),
+    # 异氰酸酯相关
     ("异氰酸酯", "水", "反应放出 CO2（除非有意发泡）"),
     ("isocyanate", "water", "CO2 release unless foaming intended"),
+    ("异氰酸酯", "乙醇", "反应生成氨基甲酸酯（配比失衡）"),
+    ("isocyanate", "ethanol", "unbalanced urethane reaction"),
+    # 环氧相关
+    ("环氧树脂", "强酸", "可能开环降解"),
+    ("epoxy resin", "strong acid", "possible ring-opening degradation"),
 )
 
 
@@ -99,11 +115,39 @@ def validate_formula_chemistry(formula) -> list[str]:
             if not ok:
                 warnings.append(f"{name}: {reason}")
         # N-2: CAS 校验
-        cas = getattr(comp, "cas", "") or ""
+        cas = getattr(comp, "cas", "") or getattr(comp, "cas_no", "") or ""
         if cas:
             ok, reason = verify_cas(cas)
             if not ok:
                 warnings.append(f"{name}: {reason}")
+        # O-3: CAS 自动补全 —— 无 CAS 时用 PubChem 名称查询补全
+        elif name:
+            try:
+                completed = autocomplete_cas(name)
+                if completed:
+                    try:
+                        if hasattr(comp, "cas"):
+                            comp.cas = completed
+                        elif hasattr(comp, "cas_no"):
+                            comp.cas_no = completed
+                    except Exception:
+                        pass
+            except Exception:
+                pass
     # N-3: 兼容性
     warnings.extend(check_compatibility(comp_names))
     return warnings
+
+
+def autocomplete_cas(name: str) -> str | None:
+    """O-3: 用 PubChem 名称→CAS 自动补全。fail-open，返回 CAS 或 None。"""
+    if not name or not name.strip():
+        return None
+    try:
+        from . import chemtools
+        if not chemtools.pubchem_available():
+            return None
+        # chemtools._pubchem_name_to_cas 已有缓存机制
+        return chemtools._pubchem_name_to_cas(name.strip())
+    except Exception:
+        return None

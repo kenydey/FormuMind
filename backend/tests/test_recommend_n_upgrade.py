@@ -89,3 +89,35 @@ def test_consensus_config():
     assert hasattr(s, "prompt_ab_enabled")
     assert hasattr(s, "chem_validate_enabled")
     assert hasattr(s, "ratio_completion_enabled")
+
+
+def test_compatibility_expanded():
+    """O-2: 20 对兼容性规则。"""
+    from app.services.chem_validate import INCOMPATIBLE_PAIRS, check_compatibility
+    assert len(INCOMPATIBLE_PAIRS) >= 20
+    # 新增规则生效
+    warns = check_compatibility(["高锰酸钾", "甘油"])
+    assert len(warns) >= 1
+
+
+def test_ratio_reasonableness():
+    """O-4: 配比合理性评分。"""
+    from app.services.recommend_pipeline import _score_ratio_reasonableness
+
+    class FakeIng:
+        def __init__(self, name, wp):
+            self.name = name
+            self.weight_pct = wp
+
+    class FakeForm:
+        def __init__(self, ings):
+            self.ingredients = ings
+
+    # 正常配比无警告
+    f = FakeForm([FakeIng("环氧树脂", 50.0), FakeIng("钛白粉", 25.0)])
+    assert _score_ratio_reasonableness(f) == []
+    # 异常配比有警告
+    f = FakeForm([FakeIng("环氧树脂", 95.0)])
+    warns = _score_ratio_reasonableness(f)
+    assert len(warns) >= 1
+    assert "过高" in warns[0]

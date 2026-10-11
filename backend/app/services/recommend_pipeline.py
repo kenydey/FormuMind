@@ -205,6 +205,49 @@ def _complete_ratios(form) -> None:
                 pass
 
 
+def _score_ratio_reasonableness(form) -> list[str]:
+    """O-4: 配比合理性评分。异常配比警告。
+
+    规则（涂料典型范围）：
+    - 树脂 30-70%，颜料 5-40%，溶剂 5-40%，助剂 0.1-10%，固化剂 5-30%
+    - 单一成分 >80% 或 <0.1% 时警告
+    """
+    warnings = []
+    ingredients = getattr(form, "ingredients", None) or getattr(form, "components", []) or []
+    if not ingredients:
+        return warnings
+    _ranges = [
+        (("resin", "树脂", "基料", "epoxy", "环氧"), 30.0, 70.0),
+        (("pigment", "颜料", "tio2", "钛白"), 5.0, 40.0),
+        (("filler", "填料", "碳酸钙"), 5.0, 40.0),
+        (("solvent", "溶剂", "二甲苯"), 5.0, 40.0),
+        (("additive", "助剂", "分散剂", "消泡剂"), 0.1, 10.0),
+        (("hardener", "固化剂", "amine"), 5.0, 30.0),
+    ]
+    for ing in ingredients:
+        name = (getattr(ing, "name", "") or "").lower()
+        wp = getattr(ing, "weight_pct", None) or 0
+        if wp <= 0:
+            continue
+        # 极端值检查
+        if wp > 80:
+            warnings.append(f"配比异常：{getattr(ing, 'name', '')} 占比 {wp:.1f}% 过高")
+            continue
+        if wp < 0.1:
+            warnings.append(f"配比异常：{getattr(ing, 'name', '')} 占比 {wp:.2f}% 过低")
+            continue
+        # 类型范围检查
+        for keywords, lo, hi in _ranges:
+            if any(kw in name for kw in keywords):
+                if not (lo <= wp <= hi):
+                    warnings.append(
+                        f"配比偏离典型范围：{getattr(ing, 'name', '')} {wp:.1f}%"
+                        f"（典型 {lo:.0f}-{hi:.0f}%）"
+                    )
+                break
+    return warnings
+
+
 def resolve_recommend_n(requested: int | None, *, settings: Settings | None = None) -> int:
     settings = settings or get_settings()
     n = requested if requested is not None else settings.recommend_default_n
@@ -425,6 +468,12 @@ def finalize_recommendation_bundle(
                 _complete_ratios(form)
         except Exception:
             pass
+    # O-4: 配比合理性评分 —— 异常配比警告
+    try:
+        for form in scored:
+            warnings.extend(_score_ratio_reasonableness(form))
+    except Exception:
+        pass
 
     scored, aligned_formulas, dedup_notes, diversity_applied = finalize_scored_formulations(
         rec_formulas,
