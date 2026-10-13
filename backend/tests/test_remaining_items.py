@@ -60,13 +60,3 @@ def test_ab_tracking():
     assert "sufficient_data" in stats
     # 无数据时
     assert stats["sufficient_data"] is False
-
-
-def test_kb_incremental():
-    """KB 增量更新。"""
-    from app.services.kb_incremental import content_hash
-    h1 = content_hash(b"hello")
-    h2 = content_hash(b"hello")
-    h3 = content_hash(b"world")
-    assert h1 == h2
-    assert h1 != h3

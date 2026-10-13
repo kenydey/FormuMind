@@ -12,14 +12,6 @@ from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# P1-9: 各 metric 的物理下界（修正后钳制）。未列出的 metric 走名称启发式。
-_PHYSICAL_LOWER_BOUNDS: dict[str, float] = {
-    "salt_spray_h": 0.0,
-    "cost_cny_per_kg": 0.0,
-    "voc_gpl": 0.0,
-}
-
-
 def load_latest_bias_by_metric(
     *,
     campaign_id: int | None = None,
@@ -153,14 +145,11 @@ def soft_correct_predicted(
             continue
         # P1-9: 物理下界钳制 —— 时长/浓度/百分比等 metric 修正后不能为负
         corrected_val = raw - mean_err
-        _lower = _PHYSICAL_LOWER_BOUNDS.get(metric, None)
-        if _lower is None:
-            # 默认：已知非负物理量（时长、浓度、百分比、成本等）下界为 0
-            _lower = 0.0 if any(
-                k in metric for k in ("_h", "hour", "pct", "percent", "cost", "voc", "density", "viscosity", "concentration", "content")
-            ) else None
-        if _lower is not None and corrected_val < _lower:
-            corrected_val = _lower
+        # 已知非负物理量（时长、浓度、百分比、成本等）下界为 0
+        if corrected_val < 0 and any(
+            k in metric for k in ("_h", "hour", "pct", "percent", "cost", "voc", "density", "viscosity", "concentration", "content")
+        ):
+            corrected_val = 0.0
         out[metric] = round(corrected_val, 4)
         corrected.append(metric)
     return out, corrected

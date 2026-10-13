@@ -77,10 +77,6 @@ def _download_worker(task: DownloadTask) -> None:
     try:
         from huggingface_hub import snapshot_download
 
-        def _progress(current: int, total: int) -> None:
-            if total > 0:
-                task.progress = round(current / total * 100, 1)
-
         # snapshot_download 支持断点续传
         snapshot_download(
             repo_id=task.model_id,

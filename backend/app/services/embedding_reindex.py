@@ -13,7 +13,7 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-# 模型维度映射（与 API 一致）
+# 模型维度映射（API 层同样引用这一份）
 _MODEL_DIMS = {
     "sentence-transformers/all-MiniLM-L6-v2": 384,
     "BAAI/bge-small-zh-v1.5": 512,
@@ -34,12 +34,7 @@ def reindex_for_model(
     流程：备份 → 加载模型 → 逐批重嵌 → 更新 embedding_model → 校验。
     返回统计 dict。
     """
-    from ..config import get_settings
-
-    settings = get_settings()
-    # DB 路径：默认从 settings 或 backend/data/formumind.db
     if db_path is None:
-        # 尝试从 settings 获取，或用默认
         db_path = Path(__file__).resolve().parent.parent.parent / "data" / "formumind.db"
     db_path = Path(db_path)
     if not db_path.exists():

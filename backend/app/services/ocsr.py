@@ -294,7 +294,7 @@ def resolve_vision_backend() -> str:
     prefer = (s.chem_vision_backend or "auto").strip().lower()
     if prefer == "off":
         return "off"
-    if prefer in _CHEM_VISION_TIERS and prefer != "off":
+    if prefer in _CHEM_VISION_TIERS:
         return prefer
     if prefer != "auto":
         logger.warning("unknown chem_vision_backend=%r — using auto", s.chem_vision_backend)

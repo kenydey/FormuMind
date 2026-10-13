@@ -15,9 +15,6 @@ _FOLLOWUP_MARKERS = re.compile(
     r"(它|其|该|此|这个|那个|上面|上述|前者|后者|怎么样|如何|多少)",
     re.IGNORECASE,
 )
-# D P2-5: "吗/呢" 是疑问语气词，不必然表示指代 —— 仅短问句（≤12 字）
-# 才视为 follow-up 信号，避免"磷酸锌好吗？"这类独立问句误触发重写。
-_FOLLOWUP_QUESTION_PARTICLES = re.compile(r"(呢|吗)", re.IGNORECASE)
 _CHEM_TOKEN_RE = re.compile(
     r"(磷酸锌|环氧树脂|固化剂|防锈颜料|乳液|牌号|盐雾|添加量|wt%|实施例|[A-Za-z]{2,}[- ]?\d{2,4})"
 )
@@ -153,9 +150,6 @@ def rewrite_query(
             return q, None
 
         needs_context = bool(_FOLLOWUP_MARKERS.search(q)) or len(q) <= 24
-        # D P2-5: "吗/呢" 仅短问句才视为 follow-up 信号。
-        if not needs_context and _FOLLOWUP_QUESTION_PARTICLES.search(q) and len(q) <= 12:
-            needs_context = True
         if not needs_context:
             return q, None
 

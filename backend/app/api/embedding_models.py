@@ -14,6 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..services import embedding_download
+from ..services.embedding_reindex import _MODEL_DIMS
 from ..services.rag import EMBEDDING_MODEL_CATALOG, embed_model_name
 
 logger = logging.getLogger(__name__)
@@ -59,16 +60,6 @@ class SwitchRequest(BaseModel):
 class SwitchResponse(BaseModel):
     status: str
     message: str
-
-
-# 模型维度映射
-_MODEL_DIMS = {
-    "sentence-transformers/all-MiniLM-L6-v2": 384,
-    "BAAI/bge-small-zh-v1.5": 512,
-    "BAAI/bge-m3": 1024,
-    "Qwen/Qwen3-Embedding-0.6B": 1024,
-    "moka-ai/m3e-base": 768,
-}
 
 
 @router.get("", response_model=list[EmbeddingModelInfo])

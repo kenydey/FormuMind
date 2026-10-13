@@ -545,15 +545,9 @@ def run_fix_loop(
                 # v24-fix: 坐标对齐 —— 重写答案 [^n] 到过滤后空间（与 chat.py 一致）。
                 # v25: 抽为 services/citation_coords.py 共享函数，消除双实现漂移。
                 try:
-                    from .citation_coords import (
-                        claims_evidence_with_mapping,
-                        remap_citation_numbers,
-                    )
+                    from .citation_coords import reviewer_view
 
-                    _review_cits, _mapping = claims_evidence_with_mapping(citations)
-                    _review_answer = remap_citation_numbers(
-                        current, _mapping, n_evidence=len(citations)
-                    )
+                    _review_answer, _review_cits = reviewer_view(current, citations)
                 except Exception:
                     _review_cits = citations
                     _review_answer = current

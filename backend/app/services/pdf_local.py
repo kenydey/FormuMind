@@ -158,8 +158,6 @@ def _configure_layout() -> None:
                 pymupdf4llm.use_layout(wanted)
             _layout_configured = True
             _layout_last_wanted = wanted
-            if _layout_last_wanted != wanted:
-                logger.info("pdf_local: layout 配置已更新为 %s", wanted)
     except Exception as exc:  # pragma: no cover - older build without the switch
         logger.debug("pdf_local: layout switch unavailable (%s)", exc)
         _layout_configured = True

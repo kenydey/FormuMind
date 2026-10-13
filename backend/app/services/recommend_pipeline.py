@@ -50,9 +50,6 @@ def run_recommend_orchestration(
     # P1-1: llm_only/无证据时关闭 strict grounding（tag-only，不剔除）
     strict_grounding: bool = True,
     settings: Settings | None = None,
-    # 增量 #11: A/B 分流键（用户 ID）。None = 不分流（对照组）。
-    # 按用户 ID 哈希保证同一用户体验一致。
-    ab_user_id: str | None = None,
 ) -> RecommendBundle:
     """Single orchestration entry for formulation recommendation.
 
@@ -77,15 +74,7 @@ def run_recommend_orchestration(
     # C-8: one id per recommendation round, shared by API response + telemetry.
     recommend_id = uuid.uuid4().hex
 
-    # 增量 #11: A/B 分流 —— 按用户 ID 哈希，实验组用不同 MMR 参数。
-    # 默认关闭（ab_user_id=None → 对照组）。
     import hashlib
-    ab_group = "control"
-    if ab_user_id and getattr(settings, "recommend_ab_enabled", False):
-        _h = int(hashlib.md5(ab_user_id.encode()).hexdigest()[:8], 16)
-        ab_group = "experiment" if _h % 2 == 0 else "control"
-        logger.info("recommend A/B: user %s → %s (recommend_id=%s)",
-                    ab_user_id[:8], ab_group, recommend_id[:8])
 
     # N-4: 提示词模板 A/B —— 按 recommend_id 哈希分流，跟踪接地通过率
     prompt_variant = "v1"
@@ -102,7 +91,7 @@ def run_recommend_orchestration(
         llm_n = llm_candidate_count(n, settings=settings)
         # N-4: v2 变体在 modify_prompt 前加约束强调
         _mp = modify_prompt
-        if prompt_variant == "v2" and not synth_override:
+        if prompt_variant == "v2":
             _mp = ("【重要】每个成分必须给出 CAS 号或分子式，配比总和必须为 100%。\n" + _mp) if _mp else "【重要】每个成分必须给出 CAS 号或分子式，配比总和必须为 100%。"
         rec_resp = llm.recommend_formulations(
             req,

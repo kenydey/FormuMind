@@ -68,6 +68,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def campaign_domain(campaign: Campaign) -> ProductDomain:
+    """v29 H-5: the campaign's product domain; old rows (or an unknown value) fall back to anticorrosion_coating."""
+    try:
+        return ProductDomain(getattr(campaign, "domain", None))
+    except ValueError:
+        return ProductDomain.anticorrosion_coating
+
+
 def _new_item_id(campaign_id: int, run_id: int) -> str:
     suffix = uuid.uuid4().hex[:8]
     return f"formumind_c{campaign_id}_r{run_id}_{suffix}"
@@ -722,16 +730,7 @@ class DatalabCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        # v29 H-5: domain from campaign (was hardcoded)
-        domain_val = getattr(campaign, "domain", None)
-        if domain_val:
-            try:
-                domain = ProductDomain(domain_val)
-            except ValueError:
-                domain = ProductDomain.anticorrosion_coating
-        else:
-            domain = ProductDomain.anticorrosion_coating
-        objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
+        objectives = objectives_from_snapshot(campaign.objectives_snapshot, campaign_domain(campaign))
         ref_by_id = {int(r["id"]): str(r["item_id"]) for r in (campaign.sample_refs or [])}
         updated = 0
         failed = 0
@@ -987,16 +986,7 @@ class SqliteCampaignStore(_CampaignMetaMixin, CampaignStoreInterface):
         if campaign is None:
             return 0, []
 
-        # v29 H-5: domain from campaign (was hardcoded)
-        domain_val = getattr(campaign, "domain", None)
-        if domain_val:
-            try:
-                domain = ProductDomain(domain_val)
-            except ValueError:
-                domain = ProductDomain.anticorrosion_coating
-        else:
-            domain = ProductDomain.anticorrosion_coating
-        objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
+        objectives = objectives_from_snapshot(campaign.objectives_snapshot, campaign_domain(campaign))
 
         refs = list(campaign.sample_refs or [])
         ref_by_id = {int(r["id"]): r for r in refs}

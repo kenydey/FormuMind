@@ -104,7 +104,6 @@ def enrich_manifest_oa(
     # stays single-threaded in the aggregation loop below.
     timeout = float(getattr(settings, "fulltext_timeout_s", 60) or 60)
     # v2 决策②：pdf_quota 不再作为降级门，仅监控告警。
-    allow_pdf = True
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
         try:
@@ -142,7 +141,7 @@ def enrich_manifest_oa(
     def _fetch_job(job: tuple[dict[str, Any], Evidence, str]):
         it, ev, kind = job
         try:
-            _hit = _ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            _hit = _ff._dispatch_fetch(kind, ev, timeout)
             # 2026-10-11 Phase 1 P0-1c: 透传完整 FetchedFulltext，不再只取 .text
             text = _hit.text if _hit else None
             pdf_bytes = _hit.pdf_bytes if _hit else None

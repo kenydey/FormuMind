@@ -53,25 +53,6 @@ def test_optimizer_early_stopping():
     assert not opt2.should_stop_early(patience=5)
 
 
-def test_pareto_frontier():
-    """帕累托前沿。"""
-    from app.services.tradeoff_analysis import _pareto_frontier
-
-    class FakeForm:
-        def __init__(self, vals):
-            self.predicted = vals
-
-    forms = [
-        FakeForm({"a": 1, "b": 1}),
-        FakeForm({"a": 2, "b": 2}),  # 支配第一个
-        FakeForm({"a": 1, "b": 3}),  # 非支配
-    ]
-    pareto = _pareto_frontier(forms, ["a", "b"])
-    assert 1 in pareto  # 第二个在前沿
-    assert 2 in pareto  # 第三个在前沿
-    assert 0 not in pareto  # 第一个被支配
-
-
 def test_adapt_factor_ranges():
     """自适应 DOE。"""
     from app.services.doe_adaptive import adapt_factor_ranges

@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 
 from ..config import get_settings
+from ..db.campaign_store import campaign_domain
 from ..db.campaign_types import WorkbenchRow
-from ..db.models import Campaign
 from ..domain.schemas import ExperimentRecord, ProductDomain
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def persist_workbench_lab_ledger(
         return {"ok": False, "upserted": 0, "reason": "campaign_not_found"}
 
     project_id = (campaign.project_id or "").strip()
-    domain = _campaign_domain(campaign)
+    domain = campaign_domain(campaign)
     wb_rows = list(rows) if rows is not None else store.get_experiments_sync(campaign_id)
 
     upserted = 0
@@ -186,18 +186,6 @@ def row_to_experiment_record(
     )
 
 
-def _campaign_domain(campaign: Campaign) -> ProductDomain:
-    # v29 H-5: domain now stored on campaign (was hardcoded).
-    # Falls back to anticorrosion_coating for old rows.
-    domain_val = getattr(campaign, "domain", None)
-    if domain_val:
-        try:
-            return ProductDomain(domain_val)
-        except ValueError:
-            pass
-    return ProductDomain.anticorrosion_coating
-
-
 def _compute_prediction_bias(
     to_add: list[ExperimentRecord],
     domain: ProductDomain,
@@ -299,7 +287,7 @@ def ingest_workbench_rows(
             "lab_ledger": ledger,
         }
 
-    domain = _campaign_domain(campaign)
+    domain = campaign_domain(campaign)
     project_id = (campaign.project_id or "").strip()
     known = registry.known_labels()
 
@@ -490,7 +478,7 @@ def ensure_experiment_for_row(campaign_id: int, row_id: int) -> int:
 
         campaign = store.get_campaign_sync(campaign_id)
         domain = (
-            _campaign_domain(campaign)
+            campaign_domain(campaign)
             if campaign is not None
             else ProductDomain.anticorrosion_coating
         )

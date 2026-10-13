@@ -180,6 +180,9 @@ export default function RecommendedFormulaTable({
     return <p className="text-xs text-slate-500">无组分数据</p>;
   }
 
+  const total = ingredients.reduce((sum, i) => sum + (Number(i.weight_pct) || 0), 0);
+  const totalDev = Math.abs(total - 100);
+
   return (
     <>
     <div className="overflow-x-auto border border-edge/60 rounded">
@@ -302,15 +305,8 @@ export default function RecommendedFormulaTable({
         <tfoot>
           <tr className="border-t border-edge font-mono">
             <td colSpan={4} className="py-1 px-2 text-right text-slate-400 text-[11px]">合计</td>
-            <td className={`py-1 px-2 text-right ${(() => {
-              const total = (ingredients || []).reduce((s: number, i: Ingredient) => s + (Number(i.weight_pct) || 0), 0);
-              const dev = Math.abs(total - 100);
-              return dev > 5 ? "text-red-400 font-bold" : dev > 0.5 ? "text-amber-400" : "text-slate-300";
-            })()}`}>
-              {(() => {
-                const total = (ingredients || []).reduce((s: number, i: Ingredient) => s + (Number(i.weight_pct) || 0), 0);
-                return `${total.toFixed(1)}%`;
-              })()}
+            <td className={`py-1 px-2 text-right ${totalDev > 5 ? "text-red-400 font-bold" : totalDev > 0.5 ? "text-amber-400" : "text-slate-300"}`}>
+              {`${total.toFixed(1)}%`}
             </td>
             <td />
           </tr>

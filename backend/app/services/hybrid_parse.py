@@ -128,17 +128,7 @@ def _heading_markdown(text: str, api_level: int) -> tuple[str, int] | None:
     except Exception:
         _extended = True
     if _extended:
-        m = _HEADING_ROMAN_RE.match(stripped)
-        if m:
-            return stripped, 1
-        m = _HEADING_CJK_NUM_RE.match(stripped)
-        if m:
-            return stripped, 1
-        m = _HEADING_LETTER_RE.match(stripped)
-        if m:
-            return stripped, 1
-        m = _HEADING_CHAPTER_RE.match(stripped)
-        if m:
+        if any(r.match(stripped) for r in (_HEADING_ROMAN_RE, _HEADING_CJK_NUM_RE, _HEADING_LETTER_RE, _HEADING_CHAPTER_RE)):
             return stripped, 1
     if api_level:
         return stripped, min(max(int(api_level), 1), 6)

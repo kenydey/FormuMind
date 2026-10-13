@@ -997,7 +997,6 @@ def enrich_search_results(
 
     limit = max_docs if max_docs is not None else settings.fulltext_max_docs
     timeout = float(settings.fulltext_timeout_s)
-    allow_pdf = True
     # v2 决策②：pdf_quota 不再作为降级门 —— 超限只记监控告警，不降级。
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
@@ -1028,7 +1027,7 @@ def enrich_search_results(
     def fetch(idx: int) -> tuple[int, FetchedFulltext | None, str]:
         ev, kind = evidence[idx], targets[idx]
         try:
-            hit = _dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            hit = _dispatch_fetch(kind, ev, timeout)
             return idx, hit, _last_acquisition()
         except Exception as exc:
             return idx, degrade_return(logger, exc, f"fulltext fetch failed ({kind})", None), "text"

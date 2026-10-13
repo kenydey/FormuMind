@@ -56,13 +56,11 @@ def _sanitize_csv_cell(value) -> str:
 
 def plan_to_csv(plan: DOEPlan, metrics: list[str]) -> str:
     """Render a DOE plan as a CSV string with blank measured columns."""
-    headers = [_sanitize_csv_cell(h) for h in _export_headers(plan, metrics)]
+    headers = _export_headers(plan, metrics)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(headers)
-    writer.writerows(
-        [[_sanitize_csv_cell(c) for c in row] for row in _export_rows(plan, _export_headers(plan, metrics))]
-    )
+    writer.writerow([_sanitize_csv_cell(h) for h in headers])
+    writer.writerows([[_sanitize_csv_cell(c) for c in row] for row in _export_rows(plan, headers)])
     return buf.getvalue()
 
 

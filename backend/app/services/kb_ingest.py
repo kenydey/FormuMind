@@ -682,7 +682,6 @@ def ingest_evidence_docs(
         emit(doc)
 
     # Per-project PDF quota: v2 决策② —— 不再作为降级门，仅监控告警。
-    allow_pdf = True
     pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
     if project_id and pdf_quota > 0:
         from ..db.source_store import get_source_store
@@ -711,7 +710,7 @@ def ingest_evidence_docs(
             # `track` spans threads: this runs in a worker, the matching index
             # phase runs on the main thread, and both land in one record.
             with timing.track(ev.identifier or "", kind):
-                return i, _fetch_one(ev, kind, timeout, emit, docs[i], allow_pdf=allow_pdf)
+                return i, _fetch_one(ev, kind, timeout, emit, docs[i])
         except Exception as exc:
             degrade_return(logger, exc, "kb_ingest fetch failed", None)
             docs[i].update(status="failed", error=str(exc)[:200])

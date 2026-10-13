@@ -71,3 +71,9 @@ def remap_citation_numbers(
             n_evidence,
         )
     return out
+
+
+def reviewer_view(answer: str, evidence: list) -> tuple[str, list]:
+    """The (answer, evidence) pair a reviewer should see: raw evidence only, with the answer's ``[^n]`` rewritten to match."""
+    kept, mapping = claims_evidence_with_mapping(evidence)
+    return remap_citation_numbers(answer, mapping, n_evidence=len(evidence)), kept

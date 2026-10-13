@@ -30,6 +30,7 @@ _WORD = re.compile(r"[a-z0-9]+")
 
 # P1-1: unified tokenizer (was ASCII-only _WORD.findall; Chinese queries
 # never matched properly on the chat session RAG path).
+from .embedding_download import is_model_cached
 from .text_tokenize import tokenize as _tokenize
 
 
@@ -356,30 +357,7 @@ class BM25FAISSStore:
     # ── query ───────────────────────────────────────────────────────────
 
     def query(self, text: str, k: int = 5) -> list[Evidence]:
-        if not self.docs:
-            return []
-
-        tokens = _bm25_tokenize(text)
-        n = min(k, len(self.docs))
-
-        # BM25 scores (sparse)
-        if self._bm25 is not None:
-            bm25_raw = self._bm25.get_scores(tokens)
-            bm25_scores = _minmax_norm(bm25_raw)
-        else:
-            bm25_scores = [0.5] * len(self.docs)
-
-        # FAISS scores (dense, best-effort)
-        faiss_scores = _faiss_scores(self._faiss_index, self._faiss_dim,
-                                     self._embedder, text, len(self.docs))
-
-        # Hybrid scoring — α shared with hybrid_search_scored / Hub probe.
-        w = self._resolved_bm25_weight()
-        hybrid = [w * b + (1 - w) * f for b, f in zip(bm25_scores, faiss_scores)]
-
-        # Top-k by hybrid score
-        order = sorted(range(len(hybrid)), key=lambda i: hybrid[i], reverse=True)[:n]
-        return [self.docs[i] for i in order]
+        return [ev for _, ev in self.query_scored(text, k)]
 
     def query_scored(self, text: str, k: int = 5) -> list[tuple[float, Evidence]]:
         """v29 B-2: 返回 (hybrid分数, Evidence)，供 colbert_store 透出真实分数。
@@ -735,13 +713,7 @@ def cross_encoder_model_cached(model_name: str | None = None) -> bool:
     name = (model_name or get_settings().cross_encoder_model or "").strip()
     if not name:
         return False
-    # 检查 HF cache 目录
-    import os
-
-    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-    # HF hub 目录命名：models--{org}--{model}
-    safe = "models--" + name.replace("/", "--")
-    return os.path.isdir(os.path.join(cache_dir, safe))
+    return is_model_cached(name)
 
 
 def _load_cross_encoder(name: str):

@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from ..config import get_settings
-from ..domain.schemas import LeverSpec, ProductDomain, Requirement
+from ..domain.schemas import LeverSpec, Requirement
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +56,10 @@ def requirement_from_campaign(campaign: Any) -> Requirement:
     v29 H-5: domain read from campaign (was hardcoded to anticorrosion_coating).
     Falls back to anticorrosion_coating for old campaigns without domain.
     """
+    from ..db.campaign_store import campaign_domain
     from ..domain.objective_contract import objectives_from_snapshot
 
-    # Read domain from campaign, fallback for old rows
-    domain_val = getattr(campaign, "domain", None)
-    if domain_val:
-        try:
-            domain = ProductDomain(domain_val)
-        except ValueError:
-            domain = ProductDomain.anticorrosion_coating
-    else:
-        domain = ProductDomain.anticorrosion_coating
+    domain = campaign_domain(campaign)
     objectives = objectives_from_snapshot(campaign.objectives_snapshot, domain)
     levers: list[LeverSpec] = []
     for item in campaign.lever_snapshot or []:

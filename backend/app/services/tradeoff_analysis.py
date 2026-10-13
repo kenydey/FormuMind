@@ -177,46 +177,6 @@ def _verification_doe_for(
         return None
 
 
-def _pareto_frontier(forms: list, metrics: list[str]) -> list[int]:
-    """P2: 识别帕累托前沿（非支配解索引）。
-
-    cost 类指标（名称含 cost）为越小越好，其余为越大越好。
-    """
-    # 越小越好的指标（成本类）
-    MINIMIZE_KEYWORDS = ("cost", "price", "time")
-    try:
-        n = len(forms)
-        if n <= 1:
-            return list(range(n))
-        # 提取指标值，成本类取负统一为越大越好
-        vals = []
-        for f in forms:
-            row = []
-            pred = getattr(f, "predicted", {}) or {}
-            for m in metrics:
-                v = float(pred.get(m, 0) or 0)
-                if any(kw in m.lower() for kw in MINIMIZE_KEYWORDS):
-                    v = -v  # 成本类取负
-                row.append(v)
-            vals.append(row)
-        pareto = []
-        for i in range(n):
-            dominated = False
-            for j in range(n):
-                if i == j:
-                    continue
-                # j 支配 i：所有指标 j>=i 且至少一个 >
-                if all(vals[j][k] >= vals[i][k] for k in range(len(metrics))) and \
-                   any(vals[j][k] > vals[i][k] for k in range(len(metrics))):
-                    dominated = True
-                    break
-            if not dominated:
-                pareto.append(i)
-        return pareto
-    except Exception:
-        return []
-
-
 def analyze_tradeoffs(
     forms: list[Formulation],
     objectives: list[ObjectiveSpec],
@@ -238,8 +198,6 @@ def analyze_tradeoffs(
 
     candidates: list[FormulationCandidateView] = []
     values: list[list[float]] = []
-    # P2: 帕累托前沿识别
-    pareto_indices = _pareto_frontier(forms, metrics)
 
     for idx, form in enumerate(forms):
         cid = candidate_id(form.name, idx)

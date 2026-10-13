@@ -404,8 +404,6 @@ def parse_search(payload: Any) -> OpsResult:
 
 # ── v2 P1-8: EPO OPS 全文下载 ────────────────────────────────────────────────
 
-FULLTEXT_URL_TMPL = BASE_URL + "/rest-services/published-data/publication/docdb/{docdb}/fulltext"
-
 
 def _fulltext_text(xml_bytes: bytes) -> str | None:
     """OPS fulltext XML → 纯文本（description + claims）。容错：未知结构返回 None。"""
@@ -457,7 +455,7 @@ secret: str,
         from .patent_ids import normalize_patent_pub
     except Exception:
         return None
-    _office, compact = normalize_patent_pub(publication)
+    _, compact = normalize_patent_pub(publication)
     if not compact:
         return None
 

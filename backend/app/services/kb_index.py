@@ -184,6 +184,25 @@ def _bump_kb_coverage(
         logger.debug("kb coverage persist failed: %s", exc)
 
 
+def _bump_kb_coverage_for_rows(rows: list[dict], old_counts: tuple[int, int, int, int] = (0, 0, 0, 0)) -> None:
+    """Net coverage change of replacing a source's ``old_counts`` (total, embedded, en, zh) with ``rows``.
+
+    ``rows=[]`` is the delete / blocked-source case: it just subtracts the old counts. Rows are bucketed by their own
+    ``lang`` (default en), the same as ``index_source``.
+    """
+    old_total, old_emb, old_en, old_zh = old_counts
+    embedded = [r for r in rows if r.get("embedding")]
+    n_en = sum(1 for r in embedded if (r.get("lang") or "en") == "en")
+    n_zh = sum(1 for r in embedded if (r.get("lang") or "en") == "zh")
+    _bump_kb_coverage(
+        embedded=len(embedded) - old_emb,
+        total=len(rows) - old_total,
+        embedded_en=n_en - old_en,
+        embedded_zh=n_zh - old_zh,
+        bm25_fallback=(len(rows) - len(embedded)) - (old_total - old_emb),
+    )
+
+
 def reset_kb_coverage_stats() -> None:
     """Test seam: zero both the DB counters and the process-local fallback."""
     # v16: 遍历 _KB_COVERAGE_KEYS —— v15-5 加了新分桶但 reset 漏了，硬编码必再漏。
@@ -750,14 +769,6 @@ def index_source(
     2026-10-11 Phase 1 P0-1b: ``tables`` — TableAsset 列表，转 markdown 后
     追加到文本参与 chunking（确保表格内容可检索）。
     """
-    # KB 增量更新：内容未变化时跳过（fail-open）
-    try:
-        from .kb_incremental import content_hash
-        _hash = content_hash(full_text.encode("utf-8", errors="ignore"))
-        # 注意：完整跳过逻辑需 DB 支持，此处仅记录哈希供未来使用
-        # TODO: 查询 DB 中记录的哈希，一致则 return 0
-    except Exception:
-        pass
     # Phase 1 P0-1b: 表格转 markdown 注入
     if tables:
         try:
@@ -785,14 +796,7 @@ def index_source(
             _sync_source_fts(source_id, [], settings)
             # v17-5: 扣减旧计数
             # v21-fix: 补 bm25_fallback 扣减。
-            _old_total, _old_emb, _old_en, _old_zh = _old_counts
-            _bump_kb_coverage(
-                total=-_old_total,
-                embedded=-_old_emb,
-                embedded_en=-_old_en,
-                embedded_zh=-_old_zh,
-                bm25_fallback=-(_old_total - _old_emb),
-            )
+            _bump_kb_coverage_for_rows([], _old_counts)
             return 0
         # U-1: 公共 chunk 准备（chunking → gate → lang → entity → embedding → dedupe）
         # 与 ingest_document_tx 共用，保证双写入路径永远一致。
@@ -810,14 +814,7 @@ def index_source(
             _sync_source_fts(source_id, [], settings)
             # v17-5: 扣减旧计数
             # v21-fix: 补 bm25_fallback 扣减。
-            _old_total, _old_emb, _old_en, _old_zh = _old_counts
-            _bump_kb_coverage(
-                total=-_old_total,
-                embedded=-_old_emb,
-                embedded_en=-_old_en,
-                embedded_zh=-_old_zh,
-                bm25_fallback=-(_old_total - _old_emb),
-            )
+            _bump_kb_coverage_for_rows([], _old_counts)
             return 0
         # v16 P1-7: re-ingest 扣减旧计数（调用方在 DB 写成功后 bump）。
         n = get_chunk_store().replace_for_source(source_id, rows)
@@ -835,18 +832,7 @@ def index_source(
             except Exception:
                 pass
         # v16 P2-7: DB 写成功后再 bump 覆盖率（写失败不虚增）。
-        if rows:
-            _old_total, _old_emb, _old_en, _old_zh = _old_counts
-            _n_emb = sum(1 for r in rows if r.get("embedding"))
-            _n_en = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "en")
-            _n_zh = sum(1 for r in rows if r.get("embedding") and (r.get("lang") or "en") == "zh")
-            _bump_kb_coverage(
-                embedded=_n_emb - _old_emb,
-                total=len(rows) - _old_total,
-                embedded_en=_n_en - _old_en,
-                embedded_zh=_n_zh - _old_zh,
-                bm25_fallback=(len(rows) - _n_emb) - (_old_total - _old_emb),
-            )
+        _bump_kb_coverage_for_rows(rows, _old_counts)
         # ``kg_link_on_ingest`` is the legacy master switch kept as a compat
         # alias: False still disables linking even if the split flags are on.
         if n and settings.kg_enabled and settings.kg_link_on_ingest and (

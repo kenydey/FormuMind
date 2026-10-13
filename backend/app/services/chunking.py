@@ -635,10 +635,8 @@ def chunk_markdown(
                 page = int(m.group(1))
                 if not current.strip():
                     current_page = page
-                    current_page_end = page
-                else:
-                    # PageIndex 借鉴 A5: 累积中遇到新页 marker，记录末页
-                    current_page_end = page
+                # PageIndex 借鉴 A5: 累积中遇到新页 marker，记录末页
+                current_page_end = page
                 continue
             bm = BLOCK_MARKER_RE.match(block)
             if bm:

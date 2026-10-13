@@ -232,15 +232,8 @@ def _augment_with_kb(
     return sources + added, len(added) + wiki_added, resolution, kg_stats
 
 
-from ..services.citation_coords import (
-    claims_evidence as _claims_evidence,
-)
-from ..services.citation_coords import (
-    claims_evidence_with_mapping as _claims_evidence_with_mapping,
-)
-from ..services.citation_coords import (
-    remap_citation_numbers as _remap_citation_numbers,
-)
+from ..services.citation_coords import claims_evidence as _claims_evidence
+from ..services.citation_coords import reviewer_view as _reviewer_view
 
 
 def _claims_and_audit(
@@ -707,8 +700,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             doi_results = emeta.get("doi_results")
             citation_expand = emeta.get("citation_expand") or None
             # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
-            _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-            _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
+            _rev_answer, _rev_evidence = _reviewer_view(answer, citations)
             evidence_reviewer = _run_evidence_review(
                 question, _rev_answer, _rev_evidence, settings
             )
@@ -1055,16 +1047,12 @@ def _fire_auto_review(
         import threading as _th
         import uuid as _uuid
 
-        from ..services.citation_coords import (
-            claims_evidence_with_mapping,
-            remap_citation_numbers,
-        )
+        from ..services.citation_coords import reviewer_view
         from ..services.reviewer_fix_loop import maybe_auto_review
 
         # v25-fix: 坐标对齐 —— 传完整 citations，在内部做 mapping+remap
         #（与 4 处主调用点同构；之前这里传的是过滤后列表，reviewer 看到的编号错位）。
-        _rev_evidence, _rev_mapping = claims_evidence_with_mapping(citations)
-        _rev_answer = remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
+        _rev_answer, _rev_evidence = reviewer_view(answer, citations)
         kwargs = dict(
             turn_id=_uuid.uuid4().hex,
             question=question,
@@ -1109,8 +1097,7 @@ def _finalize_evidence_fields(
         doi_results = emeta.get("doi_results")
         citation_expand = emeta.get("citation_expand") or None
         # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
-        _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-        _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
+        _rev_answer, _rev_evidence = _reviewer_view(answer, citations)
         reviewer = _run_evidence_review(
             question, _rev_answer, _rev_evidence, settings
         )
@@ -1436,8 +1423,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                             or req.selected_mcp_servers
                         ):
                             # v24-fix: reviewer 坐标对齐 —— 重写答案 [^n] 到过滤后空间。
-                            _rev_evidence, _rev_mapping = _claims_evidence_with_mapping(citations)
-                            _rev_answer = _remap_citation_numbers(answer, _rev_mapping, n_evidence=len(citations))
+                            _rev_answer, _rev_evidence = _reviewer_view(answer, citations)
                             evidence_reviewer = await asyncio.to_thread(
                                 _run_evidence_review,
                                 question,

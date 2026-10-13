@@ -36,23 +36,16 @@ def delete_kb_source(source_id: str) -> dict[str, Any]:
     try:
         # v16 P1-7: 删除扣减覆盖率计数器（否则单调虚增）。
         # v17-5: 先统计语言分桶，再删除（delete_for_source 只返回 total/embedded）。
-        from .kb_index import _bump_kb_coverage, _count_source_chunks, _sync_source_fts
+        from .kb_index import _bump_kb_coverage_for_rows, _count_source_chunks, _sync_source_fts
         from ..config import get_settings
 
-        _old_total, _old_emb, _old_en, _old_zh = _count_source_chunks(sid)
+        _old_counts = _count_source_chunks(sid)
         removed = get_chunk_store().delete_for_source(sid) or {}
         # v21-fix: 恢复 chunks_removed 赋值（v19-9 误删），仅用于响应字段。
         # v19-fix: 守卫与扣减同源（都用 _old_total），避免查询口径分裂。
         chunks_removed = int(removed.get("total", 0))
-        if _old_total > 0:
-            _bump_kb_coverage(
-                total=-_old_total,
-                embedded=-_old_emb,
-                embedded_en=-_old_en,
-                embedded_zh=-_old_zh,
-                # v21-fix: 补 bm25_fallback 扣减（旧行中的无向量行）。
-                bm25_fallback=-(_old_total - _old_emb),
-            )
+        if _old_counts[0] > 0:
+            _bump_kb_coverage_for_rows([], _old_counts)
         # v17-5: 清空 FTS5 镜像 —— 否则已删文档仍可被 BM25 搜到。
         try:
             _sync_source_fts(sid, [], get_settings())

@@ -946,9 +946,6 @@ class Settings(BaseSettings):
     prompt_ab_enabled: bool = False
     # N-5: 配比智能补全。默认开启。
     ratio_completion_enabled: bool = True
-    # 增量 #11: 推荐 A/B 实验开关。开启后按用户 ID 哈希分流，
-    # 实验组用不同 MMR 多样性参数。默认关闭。
-    recommend_ab_enabled: bool = False
     # P2 A/B: hybrid 融合前化学实体加成（CAS/分子式/牌号/SMILES）。
     # legacy search_chunks 的加性 0.2/0.3 是按 cosine 0-1 尺度调的，直接加到
     # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做加性，
