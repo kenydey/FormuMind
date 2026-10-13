@@ -62,7 +62,7 @@ def _celery_is_eager() -> bool:
     try:
         from ..config import get_settings
 
-        return bool(get_settings().celery_eager)
+        return get_settings().celery_eager
     except Exception:
         logger.exception("recover_stalled: failed to read celery_eager; assuming False")
         return False

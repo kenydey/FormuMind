@@ -21,7 +21,7 @@ Kind = Literal["storm", "dossier"]
 
 
 def ro_crate_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "ro_crate_export_enabled", False))
+    return settings.ro_crate_export_enabled
 
 
 def _sha256_bytes(data: bytes) -> str:

@@ -168,8 +168,8 @@ def _retry_params(settings: Any = None) -> tuple[int, float]:
             pass
     for s in candidates:
         try:
-            retries = getattr(s, "mcp_tool_retries", 2)
-            backoff_s = getattr(s, "mcp_retry_backoff_s", 0.5)
+            retries = s.mcp_tool_retries
+            backoff_s = s.mcp_retry_backoff_s
             return (
                 max(0, int(retries) if retries is not None else 2),
                 max(0.0, float(backoff_s) if backoff_s is not None else 0.5),
@@ -685,7 +685,7 @@ def _approval_gate(
             from ..config import get_settings
 
             s = get_settings()
-        enabled = bool(getattr(s, "mcp_approval_enabled", False))
+        enabled = s.mcp_approval_enabled
     except Exception:  # noqa: BLE001
         enabled = False
     if not enabled:
@@ -726,7 +726,7 @@ def call_tool_readonly(
     *,
     settings: Any = None,
 ) -> dict[str, Any]:
-    if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
+    if settings is not None and not settings.mcp_client_enabled:
         return {"ok": False, "error": "mcp_client_enabled is off"}
     if _is_writeish(tool_name):
         return {
@@ -749,7 +749,7 @@ def call_tool_with_session(
     settings: Any = None,
 ) -> dict[str, Any]:
     """Call tool; writeish requires prior session grant via approve-session."""
-    if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
+    if settings is not None and not settings.mcp_client_enabled:
         return {"ok": False, "error": "mcp_client_enabled is off"}
     if _is_writeish(tool_name):
         from .mcp_session_grants import is_granted

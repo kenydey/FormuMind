@@ -77,7 +77,7 @@ def _supply_flags(form: Formulation) -> list[str]:
 def _uncertainty(form: Formulation) -> list[str]:
     settings = get_settings()
     notes: list[str] = []
-    if not getattr(settings, "recommend_uncertainty_flag", True):
+    if not settings.recommend_uncertainty_flag:
         return notes
     stds = form.predicted_std or {}
     preds = form.predicted or {}

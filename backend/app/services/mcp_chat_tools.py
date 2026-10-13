@@ -31,7 +31,7 @@ def maybe_run_selected_mcp(
 
     if not server_ids:
         return {"results": [], "mcp_permission_required": None}
-    if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
+    if settings is not None and not settings.mcp_client_enabled:
         return {"results": [], "mcp_permission_required": None}
 
     enabled = {

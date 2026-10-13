@@ -104,7 +104,7 @@ def _sync_suppliers(session: Session, row: MaterialRow, spec: dict, *, overwrite
         return
     from ..config import get_settings
 
-    dual_write = bool(getattr(get_settings(), "materials_suppliers_json_dual_write", True))
+    dual_write = get_settings().materials_suppliers_json_dual_write
     cleaned = sync_material_suppliers_from_json(
         session,
         row.id,

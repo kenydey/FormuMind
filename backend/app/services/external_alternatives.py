@@ -5,13 +5,13 @@ degrade to an empty list — never raise into the substitutes API path.
 """
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
 
+from ..config import get_settings
 from .chem_common import _match_catalog, cache_get, cache_put
 from .errors import degrade_return
 from .http_safe import make_client
@@ -23,13 +23,7 @@ _PUBCHEM = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
 
 
 def external_substitutes_enabled() -> bool:
-    try:
-        from ..config import get_settings
-
-        return bool(get_settings().external_substitutes)
-    except Exception:
-        raw = (os.environ.get("FORMUMIND_EXTERNAL_SUBSTITUTES") or "true").strip().lower()
-        return raw not in {"0", "false", "no", "off"}
+    return get_settings().external_substitutes
 
 
 def _cache_get(key: str) -> list[dict[str, Any]] | None:

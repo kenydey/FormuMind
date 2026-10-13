@@ -116,9 +116,9 @@ def hybrid_latency_stats() -> dict[str, Any]:
 
 def _should_use_ann_gate(*, corpus_n: int, settings) -> bool:
     """Gate on scan pressure, elevated p95, or sticky hysteresis after a fire."""
-    scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
+    scan_limit = max(1, int(settings.kb_search_scan_limit or 5000))
     near_cap = corpus_n >= int(scan_limit * 0.9)
-    p95_thresh = float(getattr(settings, "kb_hybrid_ann_gate_p95_ms", 800.0) or 800.0)
+    p95_thresh = float(settings.kb_hybrid_ann_gate_p95_ms or 800.0)
     stats = hybrid_latency_stats()
     p95 = stats.get("p95_ms")
     hot = p95 is not None and float(p95) >= p95_thresh and int(stats.get("n") or 0) >= 5
@@ -129,9 +129,9 @@ def _should_use_ann_gate(*, corpus_n: int, settings) -> bool:
 
 def _ann_gate_base(*, corpus_n: int, settings) -> bool:
     """Pressure/p95 only (no sticky) — used to refresh hysteresis budget."""
-    scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
+    scan_limit = max(1, int(settings.kb_search_scan_limit or 5000))
     near_cap = corpus_n >= int(scan_limit * 0.9)
-    p95_thresh = float(getattr(settings, "kb_hybrid_ann_gate_p95_ms", 800.0) or 800.0)
+    p95_thresh = float(settings.kb_hybrid_ann_gate_p95_ms or 800.0)
     stats = hybrid_latency_stats()
     p95 = stats.get("p95_ms")
     hot = p95 is not None and float(p95) >= p95_thresh and int(stats.get("n") or 0) >= 5
@@ -291,7 +291,7 @@ def _faiss_vector_scores(
     the pre-C-1 path. Never raises.
     """
     try:
-        if not getattr(settings, "kb_ann_enabled", True):
+        if not settings.kb_ann_enabled:
             return None
         from .kb_ann import ensure_index
         from .kb_ann import search as ann_search
@@ -305,7 +305,7 @@ def _faiss_vector_scores(
             return None
         pool = max(
             top_k * 4,
-            int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
+            int(settings.kb_hybrid_ann_candidate_pool or 800),
         )
         # v18-20: 项目隔离查询时全局 ANN 命中被稀释 —— pool 放大 3 倍，
         # 确保项目过滤后仍有足够候选（否则向量通道名存实亡）。
@@ -358,7 +358,7 @@ def hybrid_search_scored(
     global _LAST_ANN_ACTIVE, _LAST_ANN_MATRIX, _LAST_ANN_FAISS, _ANN_STREAK, _ANN_STICKY_REMAINING
     settings = get_settings()
     if alpha is None:
-        alpha = float(settings.kb_hybrid_alpha)
+        alpha = settings.kb_hybrid_alpha
         # S-4: 按查询特征动态调优 alpha
         # 短查询（≤3 词）偏 BM25（精确匹配）；长查询偏向量（语义）
         # 中文查询偏向量（分词噪声大）
@@ -389,7 +389,7 @@ def hybrid_search_scored(
     try:
         from ..db.chunk_store import get_chunk_store
 
-        scan_limit = max(1, int(getattr(settings, "kb_search_scan_limit", 5000) or 5000))
+        scan_limit = max(1, int(settings.kb_search_scan_limit or 5000))
         chunks = get_chunk_store().all_chunks(
             limit=scan_limit,
             project_id=project_id,
@@ -457,7 +457,7 @@ def hybrid_search_scored(
         elif ann_active:
             pool = max(
                 top_k * 4,
-                int(getattr(settings, "kb_hybrid_ann_candidate_pool", 800) or 800),
+                int(settings.kb_hybrid_ann_candidate_pool or 800),
             )
             pool = min(pool, n)
             # Top-BM25 indices for cosine (keep zeros elsewhere → BM25-only for tail).
@@ -475,7 +475,7 @@ def hybrid_search_scored(
                 zero_token_idx = zero_token_idx[:pool]
                 top_idx = top_idx + zero_token_idx
             matrix_min = int(
-                getattr(settings, "kb_hybrid_ann_matrix_min_dim", 512) or 512
+                settings.kb_hybrid_ann_matrix_min_dim or 512
             )
             ann_matrix = _cosine_on_indices(
                 query,
@@ -539,7 +539,7 @@ def hybrid_search_scored(
         # RRF 融合分（~0.02）上会主导排序。此处对归一化分量（0-1 尺度）做
         # 加性 boost（与 legacy 同量级），再进融合，而非加到融合后的 RRF 分上。
         # 默认关，A/B 验证后再决定。
-        if getattr(settings, "kb_hybrid_entity_boost", False):
+        if settings.kb_hybrid_entity_boost:
             try:
                 qctx = kb_index._query_chem_context(query)
                 if qctx["cas"] or qctx["formulas"] or qctx["smiles"] or qctx["products"]:
@@ -557,7 +557,7 @@ def hybrid_search_scored(
         # 对 distinct heading 做一次 in-process BM25（<10ms，无 LLM），命中
         # 章节的 chunk 在融合前加性 bonus。rerank 救不了没进候选集的 chunk，
         # 所以信号必须加在检索阶段。默认关，golden A/B 验证后再决定。
-        if getattr(settings, "kb_heading_boost", False):
+        if settings.kb_heading_boost:
             try:
                 _h_paths = [c.heading_path or "" for c in chunks]
                 _distinct = sorted({h for h in _h_paths if h.strip()})
@@ -573,13 +573,13 @@ def hybrid_search_scored(
                             [(_h_map.get(h, 0.0) / _hmax) for h in _h_paths],
                             dtype=float,
                         )
-                        _w = float(getattr(settings, "kb_heading_boost_weight", 0.15))
+                        _w = settings.kb_heading_boost_weight
                         bm25_scores = bm25_scores + _boosts * _w
                         cosine_scores = cosine_scores + _boosts * _w
             except Exception:  # noqa: BLE001
                 logger.debug("hybrid heading boost skipped (fail-open)", exc_info=True)
 
-        fusion = (getattr(settings, "kb_hybrid_fusion", None) or "weighted").strip().lower()
+        fusion = (settings.kb_hybrid_fusion or "weighted").strip().lower()
         if fusion == "rrf":
             # Wave D: Reciprocal Rank Fusion (k=60). Scores stored as RRF mass
             # for hybrid_score; channel scores remain normalized BM25/cosine.
@@ -644,7 +644,7 @@ def hybrid_search_scored(
             _top("bm25_scores"),
             _top("cosine_scores"),
             _top("combined"),
-            (getattr(settings, "kb_hybrid_fusion", None) or "weighted"),
+            (settings.kb_hybrid_fusion or "weighted"),
             _loc.get("ann_active", False),
             elapsed_ms,
         )
@@ -660,7 +660,7 @@ def hybrid_search_scored(
                 _loc.get("ann_active", False),
             )
         sticky_budget = int(
-            getattr(settings, "kb_hybrid_ann_sticky_queries", 3) or 3
+            settings.kb_hybrid_ann_sticky_queries or 3
         )
         with _LATENCY_LOCK:
             _LAST_ANN_ACTIVE = ann_active
@@ -692,7 +692,7 @@ def hybrid_search(
     Note: this is **not** the session-level ``rag.BM25FAISSStore`` used by chat.
     """
     if alpha is None:
-        alpha = float(get_settings().kb_hybrid_alpha)
+        alpha = get_settings().kb_hybrid_alpha
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 

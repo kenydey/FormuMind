@@ -57,9 +57,9 @@ def build_tool_context(
 def should_enable_tools(provider: str, settings: Any) -> bool:
     from .llm import _OPENAI_COMPAT_PROVIDERS
 
-    if not getattr(settings, "chemtools_enabled", False):
+    if not settings.chemtools_enabled:
         return False
-    if not getattr(settings, "chat_chem_tools_enabled", False):
+    if not settings.chat_chem_tools_enabled:
         return False
     return (provider or "").strip().lower() in _OPENAI_COMPAT_PROVIDERS
 
@@ -469,7 +469,7 @@ def run_tool_loop_events(
 ) -> Any:
     """Yield SSE-ready dict events for a chem tool loop (sync generator)."""
     tools = openai_tool_schemas(ctx)
-    max_rounds = int(getattr(settings, "chat_chem_tools_max_rounds", 4) or 4)
+    max_rounds = int(settings.chat_chem_tools_max_rounds or 4)
     max_rounds = max(1, min(max_rounds, 8))
     tools_used: list[str] = []
     msgs = list(messages)

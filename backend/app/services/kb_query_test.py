@@ -64,7 +64,7 @@ def run_query_test(
     q = (query or "").strip()
     top_k = max(1, min(int(top_k), 50))
     if alpha is None:
-        alpha = float(settings.kb_hybrid_alpha)
+        alpha = settings.kb_hybrid_alpha
     if alpha < 0.0 or alpha > 1.0:
         raise ValueError(f"alpha must be in [0, 1], got {alpha}")
 
@@ -153,7 +153,7 @@ def run_query_test(
     if mode == "hybrid_rerank":
         # P1-12: 读生产实际开关 kb_recommend_rerank_enabled —— 此前读
         # search_rerank_enabled，探针默认行为与生产不一致。
-        want_rerank = bool(settings.kb_recommend_rerank_enabled) if rerank is None else bool(rerank)
+        want_rerank = settings.kb_recommend_rerank_enabled if rerank is None else bool(rerank)
 
     pool_k = top_k
     if want_rerank:
@@ -254,7 +254,7 @@ def run_golden_eval(
     from ..resources.golden_retrieval import golden_questions
 
     if alpha is None:
-        alpha = float(get_settings().kb_hybrid_alpha)
+        alpha = get_settings().kb_hybrid_alpha
     results: list[dict[str, Any]] = []
     passed = 0
     reciprocal_ranks: list[float] = []

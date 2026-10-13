@@ -219,12 +219,12 @@ def kg_compat_adjust(
 
     chk = check_formulation_chemistry(form, include_synergies=True)
 
-    penalty = float(settings.kg_inhibits_penalty)
-    bonus = float(settings.kg_synergizes_bonus)
-    measured_bonus = float(getattr(settings, "kg_measured_bonus", 1.15))
-    metric_bonus = float(getattr(settings, "kg_measured_metric_bonus", 1.12))
-    metric_penalty = float(getattr(settings, "kg_measured_metric_penalty", 0.92))
-    metric_presence = float(getattr(settings, "kg_measured_metric_presence", 1.05))
+    penalty = settings.kg_inhibits_penalty
+    bonus = settings.kg_synergizes_bonus
+    measured_bonus = settings.kg_measured_bonus
+    metric_bonus = settings.kg_measured_metric_bonus
+    metric_penalty = settings.kg_measured_metric_penalty
+    metric_presence = settings.kg_measured_metric_presence
 
     metric_hits = collect_measured_metric_hits(form, objectives)
     best_q = _best_quality(metric_hits)

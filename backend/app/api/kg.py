@@ -238,13 +238,13 @@ def calibration() -> dict:
             sub = session.query(KGEntityLink).filter(KGEntityLink.link_type == "substitutes").count()
             syn = session.query(KGEntityLink).filter(KGEntityLink.link_type == "synergizes").count()
     return {
-        "kg_enabled": bool(s.kg_enabled),
-        "kg_inhibits_penalty": float(getattr(s, "kg_inhibits_penalty", 0.5)),
-        "kg_synergizes_bonus": float(getattr(s, "kg_synergizes_bonus", 1.0)),
-        "kg_measured_bonus": float(getattr(s, "kg_measured_bonus", 1.15)),
-        "kg_measured_metric_bonus": float(getattr(s, "kg_measured_metric_bonus", 1.12)),
-        "kg_measured_metric_penalty": float(getattr(s, "kg_measured_metric_penalty", 0.92)),
-        "kg_measured_metric_presence": float(getattr(s, "kg_measured_metric_presence", 1.05)),
+        "kg_enabled": s.kg_enabled,
+        "kg_inhibits_penalty": s.kg_inhibits_penalty,
+        "kg_synergizes_bonus": s.kg_synergizes_bonus,
+        "kg_measured_bonus": s.kg_measured_bonus,
+        "kg_measured_metric_bonus": s.kg_measured_metric_bonus,
+        "kg_measured_metric_penalty": s.kg_measured_metric_penalty,
+        "kg_measured_metric_presence": s.kg_measured_metric_presence,
         "counts": {"inhibits": inh, "substitutes": sub, "synergizes": syn},
     }
 

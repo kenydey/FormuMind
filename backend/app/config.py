@@ -6,6 +6,7 @@ boots and tests run without any external credentials or services.
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -1166,3 +1167,27 @@ def _clear_settings_cache() -> None:
 
 
 get_settings.cache_clear = _clear_settings_cache  # type: ignore[attr-defined]
+
+
+# ── process-environment settings that are not ``Settings`` fields ──────────────────────────────────────────────────
+# They are read on every call (tests ``monkeypatch.setenv`` after import, and these have no ``.env`` form), so each
+# lives here once instead of being re-parsed at every call site.
+
+def task_dir() -> Path:
+    """Where task snapshots and progress files live (``FORMUMIND_TASK_DIR``, default: a temp subdirectory)."""
+    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
+
+
+def multi_user_enabled() -> bool:
+    """``FORMUMIND_MULTI_USER`` — per-owner API tokens instead of the single platform token."""
+    return os.environ.get("FORMUMIND_MULTI_USER", "").strip().lower() in ("1", "true", "yes")
+
+
+def api_tokens_json() -> str:
+    """``FORMUMIND_API_TOKENS_JSON`` — the owner/token mapping used in multi-user mode (``""`` when unset)."""
+    return os.environ.get("FORMUMIND_API_TOKENS_JSON", "").strip()
+
+
+def source_checkout_mode() -> bool:
+    """True when started from a source checkout (``start-dev.sh`` sets ``FORMUMIND_ENV_FILE``), not a container."""
+    return bool(os.environ.get("FORMUMIND_ENV_FILE"))

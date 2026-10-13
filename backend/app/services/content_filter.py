@@ -259,7 +259,7 @@ def llm_quality_judge(evidence: list[Evidence], query: str) -> tuple[list[Eviden
     # 把 N 条拼进一个 prompt（~24K 字符）会让 DeepSeek 单次调用耗时数百秒，
     # 触发前端 300s stall；限制到 max_items 条（~12K 字符）降到秒级，而尾部
     # 低相关结果即使被丢弃对最终 top-k 影响也小。
-    max_items = int(getattr(settings, "content_filter_llm_judge_max_items", 0) or 0)
+    max_items = int(settings.content_filter_llm_judge_max_items or 0)
     if max_items > 0 and len(evidence) > max_items:
         head, tail = evidence[:max_items], evidence[max_items:]
     else:

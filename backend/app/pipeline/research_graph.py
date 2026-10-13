@@ -91,7 +91,7 @@ def _grade_prompt(topic: str, evidence: list[Evidence]) -> str:
     # ceiling: `apply_grade` can only mark documents the grader was shown, so a
     # hardcoded 12 here silently capped everything downstream — raising the
     # report budget alone would have changed nothing.
-    limit = max(1, int(get_settings().deep_report_evidence_count))
+    limit = max(1, get_settings().deep_report_evidence_count)
     lines = "\n".join(
         f"[{i}] ({e.source}) {e.title}: {e.snippet[:200]}"
         for i, e in enumerate(evidence[:limit])
@@ -170,7 +170,7 @@ def _retrieval_queries(
     round trips there would buy breadth nobody asked for.
     """
     query = state.get("query") or state.get("topic") or ""
-    if mode != "deep" or int(settings.deep_subquestions) <= 1:
+    if mode != "deep" or settings.deep_subquestions <= 1:
         return [query]
     from . import subquestions
 
@@ -224,7 +224,7 @@ def retrieve_node(
     # A: HyDE 应用到主查询 + 前 N 个子问题（原只主查询）。
     # 每角度 1 次 LLM 调用换取检索深度；受 deep_hyde_subquestions 上限控
     # 制避免 10 次调用拖垮延迟。domain 透传给 HyDE（检索质量关键）。
-    hyde_limit = int(getattr(settings, "deep_hyde_subquestions", 2))
+    hyde_limit = settings.deep_hyde_subquestions
     domain_val = None
     _req = state.get("req")
     if _req is not None and hasattr(_req, "domain"):
@@ -254,7 +254,7 @@ def retrieve_node(
     # willing to grade.
     rerank_k = settings.colbert_top_k
     if len(queries) > 1:
-        rerank_k = max(rerank_k, int(settings.deep_report_evidence_count))
+        rerank_k = max(rerank_k, settings.deep_report_evidence_count)
     evidence = llm_rerank(query, evidence, k=rerank_k)
 
     if settings.kg_enabled:
@@ -271,14 +271,14 @@ def retrieve_node(
         from ..services import kb_index
 
         req = state.get("req")
-        if bool(getattr(settings, "kb_recommend_use_hybrid", True)):
+        if settings.kb_recommend_use_hybrid:
             project_id = (getattr(req, "project_id", None) or "").strip() or None
             kb_hits = kb_index.search_chunks_hybrid(
                 query,
                 k=settings.kb_recommend_top_k,
-                alpha=float(getattr(settings, "kb_hybrid_alpha", 0.3)),
+                alpha=settings.kb_hybrid_alpha,
                 project_id=project_id,
-                include_global=bool(getattr(settings, "kb_recommend_include_global", True)),
+                include_global=settings.kb_recommend_include_global,
             )
         else:
             kb_hits = kb_index.search_chunks(query, k=settings.kb_recommend_top_k)
@@ -794,21 +794,21 @@ def _fuse_recommend_kb_hybrid(
     Controlled by ``kb_recommend_use_hybrid`` + ``kb_recommend_top_k``. Uses the
     same ``kb_hybrid_alpha`` / project scope knobs as Hub retrieval probe.
     """
-    if not getattr(settings, "kb_v2_enabled", False):
+    if not settings.kb_v2_enabled:
         return evidence
-    if int(getattr(settings, "kb_recommend_top_k", 0) or 0) <= 0:
+    if int(settings.kb_recommend_top_k or 0) <= 0:
         return evidence
-    if not bool(getattr(settings, "kb_recommend_use_hybrid", True)):
+    if not settings.kb_recommend_use_hybrid:
         return evidence
 
     from ..services import kb_index
 
     project_id = (getattr(req, "project_id", None) or "").strip() or None
-    include_global = bool(getattr(settings, "kb_recommend_include_global", True))
+    include_global = settings.kb_recommend_include_global
     kb_hits = kb_index.search_chunks_hybrid(
         query,
-        k=int(settings.kb_recommend_top_k),
-        alpha=float(getattr(settings, "kb_hybrid_alpha", 0.3)),
+        k=settings.kb_recommend_top_k,
+        alpha=settings.kb_hybrid_alpha,
         project_id=project_id,
         include_global=include_global,
     )
@@ -818,7 +818,7 @@ def _fuse_recommend_kb_hybrid(
     seen = {e.identifier or e.title for e in evidence}
     merged = list(evidence) + [h for h in kb_hits if (h.identifier or h.title) not in seen]
 
-    if bool(getattr(settings, "kb_recommend_rerank_enabled", False)) and merged:
+    if settings.kb_recommend_rerank_enabled and merged:
         try:
             from ..services.rag import llm_rerank
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 import time
 import zipfile
 from typing import Any
@@ -19,6 +18,7 @@ from urllib.parse import quote, urlencode
 
 from loguru import logger
 
+from ..config import get_settings
 from .chem_common import cache_get, cache_put
 from .http_safe import make_client
 
@@ -32,26 +32,11 @@ _UA = "FormuMind/surechembl"
 
 
 def surechembl_enabled() -> bool:
-    try:
-        from ..config import get_settings
-
-        return bool(get_settings().surechembl)
-    except Exception:
-        raw = (os.environ.get("FORMUMIND_SURECHEMBL") or "true").strip().lower()
-        return raw not in {"0", "false", "no", "off"}
+    return get_settings().surechembl
 
 
 def surechembl_base_url() -> str:
-    try:
-        from ..config import get_settings
-
-        base = (get_settings().surechembl_base_url or "").strip()
-        if base:
-            return base.rstrip("/")
-    except Exception:
-        pass
-    env = (os.environ.get("FORMUMIND_SURECHEMBL_BASE_URL") or "").strip()
-    return (env or _DEFAULT_BASE).rstrip("/")
+    return (get_settings().surechembl_base_url.strip() or _DEFAULT_BASE).rstrip("/")
 
 
 def _cache_get(key: str) -> Any | None:

@@ -212,7 +212,7 @@ def _augment_with_kb(
     )
     # 增量 #7: 子问题分解 —— 长问题拆成子问题，多路检索后合并。
     # opt-in（chat_subquestions_enabled），fail-open。
-    if not hits and getattr(settings, "chat_subquestions_enabled", False) and len(question) > 40:
+    if not hits and settings.chat_subquestions_enabled and len(question) > 40:
         try:
             from ..pipeline.subquestions import decompose, merge_evidence
             from ..services.kb_bilingual import search as _bi_search
@@ -270,9 +270,7 @@ def _claims_and_audit(
         verified=verified,
     )
     sources_audit = None
-    if verified is not None and bool(
-        getattr(settings, "sources_audit_enabled", True)
-    ):
+    if verified is not None and settings.sources_audit_enabled:
         try:
             # P1-l: 计算未验证 claim 数（答案总句数 - 实际验证数）
             from ..services.chat_claims import _SENTENCE_SPLIT
@@ -375,7 +373,7 @@ def _apply_answer_gates(
 
     # —— P2-1：数值一致性运行时检查 ——
     # D P2-4: paperqa 路径跳过（引用格式非 [^n]，会误报）。
-    if getattr(settings, "chat_numeric_check_enabled", True) and citations and not is_paperqa:
+    if settings.chat_numeric_check_enabled and citations and not is_paperqa:
         try:
             evidence_texts = [
                 f"{c.title or ''} {c.snippet or ''}" for c in citations
@@ -419,7 +417,7 @@ def _apply_answer_gates(
 
     # —— P2-3：conflicting 判词显式透出 ——
     if (
-        getattr(settings, "chat_conflict_section_enabled", True)
+        settings.chat_conflict_section_enabled
         and verified
     ):
         # P0-3: verified.evidence_indices 是相对 Wiki 过滤后列表的下标，
@@ -450,7 +448,7 @@ def _apply_answer_gates(
         estimate_difficulty,
     )
 
-    base_threshold = float(getattr(settings, "chat_abstention_threshold", 0.5) or 0.5)
+    base_threshold = float(settings.chat_abstention_threshold or 0.5)
     should_abstain = False
     n_claims, n_unsupported = 0, 0
     if not citations:
@@ -598,7 +596,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
 
         prompt_prefix = ""
         try:
-            if getattr(settings, "chat_skills_runtime_enabled", True) and (
+            if settings.chat_skills_runtime_enabled and (
                 use_evidence or req.selected_skills or req.selected_mcp_servers
             ):
                 from ..services.evidence_synthesis import build_evidence_prompt_prefix
@@ -816,7 +814,7 @@ def chat(req: ChatRequestValidated, request: Request = None):  # type: ignore[as
             evidence_provenance = build_evidence_provenance(
                 doi_results=doi_results,
                 sourced_claims=sourced_claims,
-                enabled=bool(getattr(settings, "evidence_provenance_enabled", True)),
+                enabled=settings.evidence_provenance_enabled,
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("evidence_provenance skipped: %s", exc)
@@ -978,7 +976,7 @@ def _stream_answer_plan(req: "ChatRequestValidated", settings):
     try:
         from ..services.evidence_synthesis import enrich_chat_prompt
 
-        if getattr(settings, "chat_skills_runtime_enabled", True):
+        if settings.chat_skills_runtime_enabled:
             prompt = enrich_chat_prompt(
                 prompt,
                 mode=req.mode,
@@ -1042,7 +1040,7 @@ def _fire_auto_review(
     maybe_auto_review 内部做开关/幂等/防抖/修正轮抑制，这里只负责不阻塞。
     """
     try:
-        if not bool(getattr(settings, "auto_audit_enabled", False)):
+        if not settings.auto_audit_enabled:
             return
         import threading as _th
         import uuid as _uuid
@@ -1323,9 +1321,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                         evidence_provenance = build_evidence_provenance(
                             doi_results=doi_results,
                             sourced_claims=claims,
-                            enabled=bool(
-                                getattr(settings, "evidence_provenance_enabled", True)
-                            ),
+                            enabled=settings.evidence_provenance_enabled,
                         )
                     except Exception:  # noqa: BLE001
                         pass
@@ -1921,7 +1917,7 @@ async def chat_stream(req: "ChatRequestValidated", request: Request = None):  # 
                 evidence_provenance = build_evidence_provenance(
                     doi_results=doi_results,
                     sourced_claims=claims,
-                    enabled=bool(getattr(settings, "evidence_provenance_enabled", True)),
+                    enabled=settings.evidence_provenance_enabled,
                 )
             except Exception:  # noqa: BLE001
                 pass

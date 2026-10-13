@@ -47,7 +47,7 @@ def search_wiki(
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_chat_blend:
         return []
-    if _normalize_chat_mode(getattr(settings, "wiki_chat_mode", None)) == "raw_first":
+    if _normalize_chat_mode(settings.wiki_chat_mode) == "raw_first":
         k = min(k, 2)
     q = (query or "").strip()
     if not q:
@@ -102,7 +102,7 @@ def search_wiki(
     keyword_hits = [ev for _, ev in scored[: max(1, min(20, k))]]
 
     # Phase 3: merge embedded wiki summaries (semantic) when flag on.
-    if getattr(settings, "wiki_embed_enabled", False):
+    if settings.wiki_embed_enabled:
         try:
             from .embed import search_wiki_embedded
 
@@ -138,7 +138,7 @@ def blend_wiki_evidence(
     settings = get_settings()
     if not settings.wiki_enabled or not settings.wiki_chat_blend:
         return sources, 0
-    mode = _normalize_chat_mode(getattr(settings, "wiki_chat_mode", None))
+    mode = _normalize_chat_mode(settings.wiki_chat_mode)
     if mode == "raw_first":
         default_k = min(2, max(1, settings.kb_chat_top_k // 8 or 1))
     elif mode == "wiki_first":

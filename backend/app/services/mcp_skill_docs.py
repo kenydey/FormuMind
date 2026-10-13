@@ -259,7 +259,7 @@ def ensure_mcp_skill_docs(
     """
     from .mcp_client import list_mcp_servers
 
-    if settings is not None and not bool(getattr(settings, "mcp_client_enabled", False)):
+    if settings is not None and not settings.mcp_client_enabled:
         return []
 
     wanted = {s.strip() for s in (server_ids or []) if s and s.strip()}

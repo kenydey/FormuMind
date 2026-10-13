@@ -53,11 +53,11 @@ def manifest_path(project_id: str) -> Path:
 
 
 def manifest_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "literature_manifest_enabled", True))
+    return settings.literature_manifest_enabled
 
 
 def library_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "literature_library_enabled", False))
+    return settings.literature_library_enabled
 
 
 def empty_manifest(project_id: str) -> dict[str, Any]:
@@ -977,7 +977,7 @@ def preflight_corpus_findings(
         return findings
     man = load_manifest(project_id)
     frozen = man.get("frozen")
-    require = bool(getattr(settings, "frozen_corpus_required_for_export", False))
+    require = settings.frozen_corpus_required_for_export
     if require and not frozen:
         findings.append(
             {
@@ -1036,7 +1036,7 @@ def preflight_corpus_findings(
                 }
             )
 
-    if bool(getattr(settings, "literature_screening_required_for_export", False)):
+    if settings.literature_screening_required_for_export:
         unset = [
             i
             for i in (man.get("items") or [])

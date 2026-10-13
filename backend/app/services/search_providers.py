@@ -68,8 +68,8 @@ def _safe_int(value: object) -> int | None:
 
 def _breaker_settings(settings) -> tuple[int, float]:
     return (
-        int(getattr(settings, "provider_breaker_threshold", 5) or 5),
-        float(getattr(settings, "provider_breaker_cooldown_sec", 300.0) or 300.0),
+        int(settings.provider_breaker_threshold or 5),
+        float(settings.provider_breaker_cooldown_sec or 300.0),
     )
 
 
@@ -169,7 +169,7 @@ def arm_queries(
     # topic — irrelevant when only the top page is taken, and both dwarf the
     # 89-hit baseline this exists to fix. Staying in the fast lane is worth more
     # than the larger candidate pool.
-    group_cap = max(1, int(getattr(settings, "openalex_arm_group_terms", 3)))
+    group_cap = max(1, settings.openalex_arm_group_terms)
 
     def _group_of(items: Sequence[str]) -> str:
         return _or_group(list(items)[:group_cap])
@@ -382,7 +382,7 @@ def search_openalex(
             resolve_profile,
         )
         _prof = resolve_profile(domain)
-        if getattr(settings, "openalex_concept_filter", True):
+        if settings.openalex_concept_filter:
             _cf = openalex_concepts_filter(_prof) if _prof is not None else ""
             if _cf:
                 filter_parts.append(_cf)
@@ -552,7 +552,7 @@ def search_serpapi_patents(
     # P0: append CPC=(…) from DomainSearchProfile when patent_cpc_filter is on.
     try:
         from ..domain.search_profiles import cpc_query_clause, resolve_profile
-        if getattr(settings, "patent_cpc_filter", True):
+        if settings.patent_cpc_filter:
             _prof = resolve_profile(domain)
             if _prof is not None:
                 _clause = cpc_query_clause(_prof)

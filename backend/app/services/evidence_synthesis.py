@@ -25,7 +25,7 @@ def evidence_mode_active(mode: str | None, settings: Any) -> bool:
     raw = (mode or "").strip().lower()
     if raw in ("evidence", "paperqa", "hybrid_strict"):
         return True
-    flag = getattr(settings, "evidence_synthesis_mode", "off") or "off"
+    flag = settings.evidence_synthesis_mode or "off"
     return str(flag).strip().lower() not in ("", "off", "false", "0")
 
 
@@ -180,13 +180,13 @@ def postprocess_evidence_answer(
         "reviewer": None,
         "citation_expand": [],
     }
-    doi_on = bool(getattr(settings, "evidence_doi_verify_enabled", True))
+    doi_on = settings.evidence_doi_verify_enabled
     if doi_on:
         from .scholar_helpers import annotate_answer_dois, expand_top_dois, extract_dois
 
         answer, doi_results = annotate_answer_dois(answer, enabled=True)
         meta["doi_results"] = doi_results
-        if bool(getattr(settings, "citation_expand_enabled", True)):
+        if settings.citation_expand_enabled:
             seeds = [r["doi"] for r in doi_results if r.get("status") == "ok"] or extract_dois(
                 answer
             )

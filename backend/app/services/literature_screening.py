@@ -20,7 +20,7 @@ INSUFFICIENT_EVIDENCE_MODEL = "insufficient-evidence"
 
 
 def screening_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "literature_screening_enabled", False))
+    return settings.literature_screening_enabled
 
 
 def _norm(text: str) -> str:
@@ -272,7 +272,7 @@ def screen_project(
             }
         ]
         man = lm.save_manifest(man)
-        if settings is not None and bool(getattr(settings, "screening_auto_freeze", False)):
+        if settings is not None and settings.screening_auto_freeze:
             match_ids = [d["id"] for d in decisions if d["screening"] == "match" and d["id"]]
             if match_ids:
                 try:
@@ -649,6 +649,6 @@ def evaluate_screening(
 def screening_async_threshold(settings: Any = None) -> int:
     """Manifest 超过该条目数时走后台 job（读 settings，可测试隔离）。"""
     try:
-        return int(getattr(settings, "screening_async_threshold", 500) or 500)
+        return int(settings.screening_async_threshold or 500)
     except (TypeError, ValueError):
         return 500

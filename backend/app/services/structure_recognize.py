@@ -15,7 +15,7 @@ import hashlib
 import logging
 import os
 
-from ..config import get_settings
+from ..config import get_settings, source_checkout_mode
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,7 @@ def _shared_dir() -> str:
 
     # 源码模式由 FORMUMIND_ENV_FILE 标志区分（start-dev.sh 设置）。不能用
     # /app/data 存在性判断——host 可能残留容器模式的孤儿目录。
-    if os.environ.get("FORMUMIND_ENV_FILE"):
-        from ..config import get_settings
-
+    if source_checkout_mode():
         if get_settings().environment.strip().lower() == "test":
             import tempfile
 
@@ -141,7 +139,7 @@ def recognize_structure_image(
     # MolScribe runs in its own Celery worker, which only exists when OCSR is
     # enabled. Without this check (the vision path already has it) every upload
     # dispatched to a queue nobody consumes and waited the full molscribe_timeout_s.
-    if not getattr(settings, "ocsr_enabled", False):
+    if not settings.ocsr_enabled:
         msg = "离线结构识别未启用（设置 → OCSR 离线结构识别，需独立 molscribe worker）"
         warnings.append(msg)
         return _result(False, None, None, [], sha, False, warnings, msg)
@@ -165,7 +163,7 @@ def recognize_structure_image(
         import os as _os
 
         worker_path = path
-        if _os.environ.get("FORMUMIND_ENV_FILE"):
+        if source_checkout_mode():
             _root = _os.path.dirname(
                 _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
             )

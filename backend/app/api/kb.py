@@ -225,11 +225,11 @@ def retrieval_settings() -> KbRetrievalSettings:
 
     s = get_settings()
     return KbRetrievalSettings(
-        kb_hybrid_alpha=float(getattr(s, "kb_hybrid_alpha", 0.3)),
-        kb_recommend_use_hybrid=bool(getattr(s, "kb_recommend_use_hybrid", True)),
-        kb_recommend_include_global=bool(getattr(s, "kb_recommend_include_global", True)),
-        kb_recommend_top_k=int(getattr(s, "kb_recommend_top_k", 4) or 0),
-        kb_recommend_rerank_enabled=bool(getattr(s, "kb_recommend_rerank_enabled", False)),
+        kb_hybrid_alpha=s.kb_hybrid_alpha,
+        kb_recommend_use_hybrid=s.kb_recommend_use_hybrid,
+        kb_recommend_include_global=s.kb_recommend_include_global,
+        kb_recommend_top_k=int(s.kb_recommend_top_k or 0),
+        kb_recommend_rerank_enabled=s.kb_recommend_rerank_enabled,
     )
 
 

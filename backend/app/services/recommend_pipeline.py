@@ -78,7 +78,7 @@ def run_recommend_orchestration(
 
     # N-4: 提示词模板 A/B —— 按 recommend_id 哈希分流，跟踪接地通过率
     prompt_variant = "v1"
-    if getattr(settings, "prompt_ab_enabled", False):
+    if settings.prompt_ab_enabled:
         _ph = int(hashlib.md5(recommend_id.encode()).hexdigest()[:8], 16)
         prompt_variant = "v2" if _ph % 2 == 0 else "v1"
         logger.info("recommend prompt A/B: %s → %s", recommend_id[:8], prompt_variant)
@@ -140,7 +140,7 @@ def run_recommend_orchestration(
         track_recommendation(
             recommend_id=recommend_id,
             prompt_version=prompt_variant,
-            consensus_enabled=getattr(settings, "recommend_consensus_enabled", False),
+            consensus_enabled=settings.recommend_consensus_enabled,
             grounding_rate=grounding_rate,
             n_candidates=len(grounded_formulas),
         )
@@ -267,7 +267,7 @@ def resolve_recommend_n(requested: int | None, *, settings: Settings | None = No
 def llm_candidate_count(requested_n: int, *, settings: Settings | None = None) -> int:
     settings = settings or get_settings()
     # N-1: 多候选共识 —— 生成 3N 候选，聚类后选中心（需 diversity 启用）
-    if getattr(settings, "recommend_consensus_enabled", False) and requested_n > 1:
+    if settings.recommend_consensus_enabled and requested_n > 1:
         return min(requested_n * 3, settings.recommend_max_n)
     if settings.recommend_diversity_enabled and requested_n > 1:
         return min(requested_n * 2, settings.recommend_max_n)
@@ -286,7 +286,7 @@ def finalize_scored_formulations(
     scored, dedup_notes = chemtools.dedupe_similar_formulations(scored)
 
     # N-1: 多候选共识 —— 3N 候选中按成分聚类，选每类最高分（减少 LLM 方差）
-    if getattr(settings, "recommend_consensus_enabled", False) and len(scored) > n:
+    if settings.recommend_consensus_enabled and len(scored) > n:
         try:
             from .recommend_diversity import formulation_similarity
             # 简单聚类：按相似度阈值分组
@@ -464,7 +464,7 @@ def finalize_recommendation_bundle(
     for form in scored:
         warnings.extend(check_formulation_predictions(form, evidence))
     # N-2/N-3: 化学有效性校验 + 兼容性检查（fail-open）
-    if getattr(settings, "chem_validate_enabled", True):
+    if settings.chem_validate_enabled:
         try:
             from .chem_validate import validate_formula_chemistry
             for form in scored:
@@ -472,7 +472,7 @@ def finalize_recommendation_bundle(
         except Exception:
             pass
     # N-5: 配比智能补全 —— 缺失配比时按成分类型默认分布补全
-    if getattr(settings, "ratio_completion_enabled", True):
+    if settings.ratio_completion_enabled:
         try:
             for form in scored:
                 _complete_ratios(form)

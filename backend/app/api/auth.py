@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from ..config import get_settings
+from ..config import get_settings, multi_user_enabled
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -11,7 +11,6 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.get("/status")
 def auth_status(request: Request = None) -> dict:  # type: ignore[no-untyped-def]
     """Tell the SPA whether API bearer auth is enforced (safe without a token)."""
-    import os
 
     settings = get_settings()
     owner = "default"
@@ -24,7 +23,7 @@ def auth_status(request: Request = None) -> dict:  # type: ignore[no-untyped-def
             owner = "default"
     return {
         "auth_required": settings.api_auth_enabled,
-        "multi_user": os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() in ("1", "true", "yes"),
+        "multi_user": multi_user_enabled(),
         "owner": owner,
         "hint": (
             "Configure FORMUMIND_API_TOKEN on the server and enter the same token "

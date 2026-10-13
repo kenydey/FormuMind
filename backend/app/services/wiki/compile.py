@@ -477,7 +477,7 @@ def _compile_source_impl(source_id: str) -> dict[str, Any]:
             lint_paths(updated)
         except Exception as exc:  # noqa: BLE001
             logger.debug("wiki lint after compile skipped: %s", exc)
-    if getattr(settings, "wiki_neo4j_project", False) and updated:
+    if settings.wiki_neo4j_project and updated:
         try:
             from .neo4j_project import project_paths
 

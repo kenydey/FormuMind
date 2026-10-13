@@ -23,7 +23,7 @@ ClaimDisposition = dict[str, Any]  # status, reflag_count, disposition
 
 
 def fix_loop_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "evidence_reviewer_fix_loop_enabled", False))
+    return settings.evidence_reviewer_fix_loop_enabled
 
 
 def _data_root() -> Path:
@@ -379,7 +379,7 @@ _FIX_LOOP_GUARD = threading.Lock()
 
 
 def auto_audit_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "auto_audit_enabled", False))
+    return settings.auto_audit_enabled
 
 
 from contextlib import contextmanager  # noqa: E402

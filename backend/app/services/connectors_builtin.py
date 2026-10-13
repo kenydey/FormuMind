@@ -49,7 +49,7 @@ def list_connectors(*, settings: Any = None) -> list[dict[str, Any]]:
     disabled = set(prefs.get("disabled_connector_ids") or [])
     enabled_flag = True
     if settings is not None:
-        enabled_flag = bool(getattr(settings, "connectors_builtin_enabled", True))
+        enabled_flag = settings.connectors_builtin_enabled
     rows = []
     for c in CONNECTOR_CATALOG:
         row = dict(c)
@@ -159,7 +159,7 @@ def gather_connector_evidence(
 ) -> list[Evidence]:
     if not connector_ids:
         return []
-    if settings is not None and not bool(getattr(settings, "connectors_builtin_enabled", True)):
+    if settings is not None and not settings.connectors_builtin_enabled:
         return []
     enabled = {c["id"] for c in list_connectors(settings=settings) if c.get("enabled")}
     wanted = [cid for cid in connector_ids if cid in enabled]

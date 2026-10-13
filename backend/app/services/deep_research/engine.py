@@ -37,7 +37,7 @@ def _cross_validate_prompt(topic: str, kb_answer: str, evidence: list[Evidence])
     from ...config import get_settings
 
     settings = get_settings()
-    count = max(1, int(settings.deep_report_evidence_count))
+    count = max(1, settings.deep_report_evidence_count)
     per = int(settings.deep_report_snippet_chars or 0)
     citations = "\n".join(
         f"[{e.source}] {e.title}: {e.snippet[:per] if per > 0 else e.snippet}"

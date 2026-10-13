@@ -203,8 +203,8 @@ def rerank_candidates(
     """
     try:
         settings = get_settings()
-        enabled = bool(getattr(settings, "rerank_plugin_enabled", False))
-        model_name = str(getattr(settings, "rerank_model", "") or "")
+        enabled = settings.rerank_plugin_enabled
+        model_name = str(settings.rerank_model or "")
     except Exception as exc:
         logger.warning("rerank plugin settings unreadable (%s); skipping", exc)
         return list(candidates[:k]), "none"

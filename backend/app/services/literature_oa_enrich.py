@@ -17,7 +17,7 @@ Scope = Literal["candidates", "frozen", "missing_fulltext"]
 
 
 def oa_enrich_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "literature_oa_enrich_enabled", True))
+    return settings.literature_oa_enrich_enabled
 
 
 def _item_needs_fulltext(item: dict[str, Any]) -> bool:
@@ -102,9 +102,9 @@ def enrich_manifest_oa(
     # _dispatch_fetch is network-bound and thread-safe (thread-local
     # acquisition tracking); _persist_fulltext does the SQLite writes and
     # stays single-threaded in the aggregation loop below.
-    timeout = float(getattr(settings, "fulltext_timeout_s", 60) or 60)
+    timeout = float(settings.fulltext_timeout_s or 60)
     # v2 决策②：pdf_quota 不再作为降级门，仅监控告警。
-    pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
+    pdf_quota = int(settings.kb_project_pdf_quota or 0)
     if project_id and pdf_quota > 0:
         try:
             from ..db.source_store import get_source_store

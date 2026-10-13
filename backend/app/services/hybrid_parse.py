@@ -78,7 +78,7 @@ def _needs_escalation(page: pdf_local.LocalPage) -> bool:
         return True
     if page.n_tables and not page.has_markdown_table:
         return True
-    if page.image_area_ratio >= float(settings.hybrid_image_area_threshold):
+    if page.image_area_ratio >= settings.hybrid_image_area_threshold:
         return True
     return False
 
@@ -124,7 +124,7 @@ def _heading_markdown(text: str, api_level: int) -> tuple[str, int] | None:
     try:
         from ..config import get_settings
 
-        _extended = bool(get_settings().pdf_heading_rules_extended)
+        _extended = get_settings().pdf_heading_rules_extended
     except Exception:
         _extended = True
     if _extended:
@@ -230,7 +230,7 @@ def _visual_markdown(
 
     # ── circuit breaker: skip when the endpoint has been telling us no ──
     settings = get_settings()
-    budget = int(settings.vision_max_consecutive_failures)
+    budget = settings.vision_max_consecutive_failures
     if budget and _vision_consecutive_failures.get() >= budget:
         logger.info(
             "hybrid: vision breaker open after %d consecutive permanent "
@@ -296,7 +296,7 @@ def _escalate_page(content: bytes, page: pdf_local.LocalPage) -> str | None:
     if not page_pdf:
         return None
     document = mineru_cloud.parse_bytes(
-        page_pdf, ext="pdf", timeout=float(get_settings().mineru_page_timeout_s)
+        page_pdf, ext="pdf", timeout=get_settings().mineru_page_timeout_s
     )
     if document is None or not document.blocks:
         # v16 P3-4: MinerU 空结果不再静默 —— 写用户可见 note。
@@ -356,7 +356,7 @@ def _parse_scanned(content: bytes, pages: list[pdf_local.LocalPage]) -> str | No
     scan cannot swallow the day's quota by accident.
     """
     settings = get_settings()
-    cap = int(settings.mineru_max_pages_per_doc)
+    cap = settings.mineru_max_pages_per_doc
     if len(pages) > cap:
         logger.warning(
             "hybrid: %d-page scan exceeds the %d-page cap — not sending to MinerU",
@@ -412,10 +412,10 @@ def _scanned_vision_fallback(content: bytes) -> str | None:
         ok = False
     if not ok:
         return None
-    limit = min(3, int(getattr(get_settings(), "rapidocr_max_pages", 30)))
+    limit = min(3, get_settings().rapidocr_max_pages)
     parts: list[str] = []
     for page_no in range(1, limit + 1):
-        png = page_as_png(content, page_no, dpi=int(get_settings().rapidocr_dpi))
+        png = page_as_png(content, page_no, dpi=get_settings().rapidocr_dpi)
         if not png:
             continue
         try:
@@ -461,7 +461,7 @@ def _scanned_without_cloud(content: bytes) -> str | None:
             n_sample = min(3, _pl.page_count(content))
             for pg in range(1, n_sample + 1):
                 png = _pl.page_as_png(
-                    content, pg, dpi=int(get_settings().rapidocr_dpi), _doc=doc
+                    content, pg, dpi=get_settings().rapidocr_dpi, _doc=doc
                 )
                 if not png:
                     continue
@@ -504,7 +504,7 @@ def _scanned_without_cloud(content: bytes) -> str | None:
     # engine, and a 200-page scan must not be able to swallow an ingest run
     # merely because the first reader was unavailable.
     text = pdf_local.ocr_markdown(
-        content, max_pages=int(get_settings().rapidocr_max_pages)
+        content, max_pages=get_settings().rapidocr_max_pages
     )
     if text:
         logger.info("hybrid: scanned document read by the layout parser's own OCR")
@@ -613,7 +613,7 @@ def parse(content: bytes) -> str | None:
             or None
         )
 
-    cap = int(get_settings().mineru_max_pages_per_doc)
+    cap = get_settings().mineru_max_pages_per_doc
     candidates = [p for p in pages if _needs_escalation(p)]
     selected = candidates[:cap]
     if len(candidates) > cap:
@@ -644,8 +644,8 @@ def parse(content: bytes) -> str | None:
     # *consecutively*: a document where some pages come back keeps going,
     # because that is a working connection with a few hard pages. The batch
     # path needs no breaker — a broken network costs it one timeout, not N.
-    budget = int(get_settings().mineru_max_page_failures)
-    min_conf = float(get_settings().rapidocr_min_confidence)
+    budget = get_settings().mineru_max_page_failures
+    min_conf = get_settings().rapidocr_min_confidence
     upgraded: dict[int, str] = {}
     attempted = 0
     consecutive_failures = 0
@@ -662,7 +662,7 @@ def parse(content: bytes) -> str | None:
             from . import rapidocr_local
 
             png = pdf_local.page_as_png(
-                content, page.page_no, dpi=int(get_settings().rapidocr_dpi)
+                content, page.page_no, dpi=get_settings().rapidocr_dpi
             )
             if png:
                 text, conf = rapidocr_local.ocr_png_scored(png)

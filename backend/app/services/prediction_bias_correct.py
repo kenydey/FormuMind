@@ -92,7 +92,7 @@ def soft_correct_predicted(
     """
     settings = get_settings()
     if enabled is None:
-        enabled = bool(getattr(settings, "prediction_bias_soft_correct", False))
+        enabled = settings.prediction_bias_soft_correct
         if not enabled and project_id:
             try:
                 from ..db.project_store import get_project_store
@@ -105,7 +105,7 @@ def soft_correct_predicted(
                 enabled = False
     if not enabled:
         return dict(predicted or {}), []
-    min_n = int(getattr(settings, "prediction_bias_soft_correct_min_n", 3) or 3)
+    min_n = int(settings.prediction_bias_soft_correct_min_n or 3)
     bias = by_metric if by_metric is not None else load_latest_bias_by_metric(
         campaign_id=campaign_id, project_id=project_id
     )

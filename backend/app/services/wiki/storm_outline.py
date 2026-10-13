@@ -17,11 +17,11 @@ def _require_storm_enabled() -> None:
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise PermissionError("wiki_project_dossier_enabled is false")
-    if not getattr(settings, "wiki_dossier_report_enabled", False):
+    if not settings.wiki_dossier_report_enabled:
         raise PermissionError("wiki_dossier_report_enabled is false")
-    if not getattr(settings, "wiki_storm_report_enabled", False):
+    if not settings.wiki_storm_report_enabled:
         raise PermissionError("wiki_storm_report_enabled is false")
 
 

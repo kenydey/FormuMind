@@ -44,7 +44,7 @@ def artifacts_root(settings=None) -> Path:
     from ..config import get_settings
 
     settings = settings or get_settings()
-    root = Path(getattr(settings, "model_artifacts_dir", "./data/models") or "./data/models")
+    root = Path(settings.model_artifacts_dir or "./data/models")
     root.mkdir(parents=True, exist_ok=True)
     return root
 

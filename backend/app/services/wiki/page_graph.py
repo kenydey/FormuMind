@@ -24,7 +24,7 @@ _BROKEN_CAP = 50
 def page_graph_enabled() -> bool:
     settings = get_settings()
     return bool(
-        settings.wiki_enabled and getattr(settings, "wiki_page_graph_enabled", False)
+        settings.wiki_enabled and settings.wiki_page_graph_enabled
     )
 
 

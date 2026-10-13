@@ -278,7 +278,7 @@ def search_pages(
     mode = "fallback"
     fetch_limit = min(200, max(limit * 5, limit)) if project_id else limit
 
-    if getattr(settings, "wiki_fts_enabled", True):
+    if settings.wiki_fts_enabled:
         from ..services.wiki.fts import search_fts
 
         raw = search_fts(store._session_factory, q, kind=kind, limit=fetch_limit)
@@ -554,11 +554,11 @@ def start_storm_report_endpoint(body: StormReportRequest, request: Request):
 
     _require_wiki()
     settings = get_settings()
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise HTTPException(status_code=409, detail="wiki_project_dossier_enabled is false")
-    if not getattr(settings, "wiki_dossier_report_enabled", False):
+    if not settings.wiki_dossier_report_enabled:
         raise HTTPException(status_code=409, detail="wiki_dossier_report_enabled is false")
-    if not getattr(settings, "wiki_storm_report_enabled", False):
+    if not settings.wiki_storm_report_enabled:
         raise HTTPException(status_code=409, detail="wiki_storm_report_enabled is false")
 
     payload = {
@@ -628,11 +628,11 @@ def export_storm_report_endpoint(body: StormReportExportRequest):
     from ..services.wiki.storm_orchestrator import export_storm_report
 
     settings = get_settings()
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise HTTPException(status_code=409, detail="wiki_project_dossier_enabled is false")
-    if not getattr(settings, "wiki_dossier_report_enabled", False):
+    if not settings.wiki_dossier_report_enabled:
         raise HTTPException(status_code=409, detail="wiki_dossier_report_enabled is false")
-    if not getattr(settings, "wiki_storm_report_enabled", False):
+    if not settings.wiki_storm_report_enabled:
         raise HTTPException(status_code=409, detail="wiki_storm_report_enabled is false")
 
     try:
@@ -837,7 +837,7 @@ def rebuild_wiki_catalog(body: WikiCatalogRebuildRequest | None = None) -> dict:
 def rebuild_fts_endpoint() -> dict:
     """Rebuild Wiki FTS index from all pages (admin / ops)."""
     _require_wiki()
-    if not getattr(get_settings(), "wiki_fts_enabled", True):
+    if not get_settings().wiki_fts_enabled:
         raise HTTPException(status_code=409, detail="wiki_fts_enabled is false")
     from ..services.wiki.fts import rebuild_all
 
@@ -850,7 +850,7 @@ def rebuild_fts_endpoint() -> dict:
 def rebuild_embed_endpoint() -> dict:
     """Phase 3: re-embed all wiki page summaries into document_chunks."""
     _require_wiki()
-    if not getattr(get_settings(), "wiki_embed_enabled", False):
+    if not get_settings().wiki_embed_enabled:
         raise HTTPException(status_code=409, detail="wiki_embed_enabled is false")
     from ..services.wiki.embed import rebuild_all_wiki_embeds
 

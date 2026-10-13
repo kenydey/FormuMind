@@ -504,8 +504,8 @@ def _epo_fulltext_fallback(patent_id: str, timeout: float) -> "FetchedFulltext |
         from ..config import get_settings
 
         settings = get_settings()
-        key = getattr(settings, "epo_consumer_key", None)
-        secret = getattr(settings, "epo_consumer_secret", None)
+        key = settings.epo_consumer_key
+        secret = settings.epo_consumer_secret
         if not (key and secret):
             return None
         pub = (patent_id or "").strip().upper()
@@ -540,7 +540,7 @@ def fetch_patent_fulltext(
     from ..config import get_settings
 
     if prefer_html is None:
-        prefer_html = bool(getattr(get_settings(), "patent_prefer_html", True))
+        prefer_html = get_settings().patent_prefer_html
 
     html = fetch_patent_landing(patent_id, timeout)
     if not html:

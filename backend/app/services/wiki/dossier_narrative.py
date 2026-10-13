@@ -42,8 +42,8 @@ def narrative_enabled() -> bool:
     settings = get_settings()
     return bool(
         settings.wiki_enabled
-        and getattr(settings, "wiki_project_dossier_enabled", False)
-        and getattr(settings, "wiki_dossier_llm_narrative", False)
+        and settings.wiki_project_dossier_enabled
+        and settings.wiki_dossier_llm_narrative
     )
 
 
@@ -177,7 +177,7 @@ def generate_section_narrative(
             :16
         ]
         meta["prompt_hash"] = prompt_hash
-        meta["model"] = getattr(get_settings(), "llm_model", "") or ""
+        meta["model"] = get_settings().llm_model or ""
 
         # Step 1 — analysis
         analysis, err1 = complete_structured(

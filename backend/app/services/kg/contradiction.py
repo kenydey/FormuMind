@@ -77,7 +77,7 @@ def detect_contradictions(entity_id: str) -> KGContradictionResponse:
     (no error). Entities without literature edges likewise return empty.
     """
     settings = get_settings()
-    threshold = float(getattr(settings, "kg_contradiction_threshold", 0.3))
+    threshold = settings.kg_contradiction_threshold
     store = get_entity_store()
     cache: dict[str, str] = {}
 

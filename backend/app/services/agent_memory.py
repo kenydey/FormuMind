@@ -398,7 +398,7 @@ def forget(
 
 def _memory_enabled() -> bool:
     try:
-        return bool(getattr(get_settings(), "agent_memory_enabled", False))
+        return get_settings().agent_memory_enabled
     except Exception:
         return False
 

@@ -246,7 +246,7 @@ _SCHEMA = "1"
 
 
 def artifact_versions_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "artifact_versions_enabled", True))
+    return settings.artifact_versions_enabled
 
 
 def _data_root() -> Path:

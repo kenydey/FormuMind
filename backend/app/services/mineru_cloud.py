@@ -233,7 +233,7 @@ def parse_bytes(
         return None
 
     settings = get_settings()
-    limit = int(settings.mineru_max_upload_mb) * 1024 * 1024
+    limit = settings.mineru_max_upload_mb * 1024 * 1024
     if len(content) > limit:
         # Refused locally on purpose: an upload that is going to be rejected
         # should not cost a round trip, and on a metered API it should not
@@ -292,7 +292,7 @@ def parse_pages_batch(
         return [None] * len(contents)
 
     settings = get_settings()
-    limit = int(settings.mineru_max_upload_mb) * 1024 * 1024
+    limit = settings.mineru_max_upload_mb * 1024 * 1024
     results: list[MinerUDocument | None] = [None] * len(contents)
     accepted: list[int] = []
     paths: list[str] = []
@@ -382,12 +382,8 @@ def _extract_options(
     (both on) apply. The effective pair is logged by the caller.
     """
     settings = get_settings()
-    eff_formula = formula if formula is not None else bool(
-        getattr(settings, "mineru_formula_enabled", True)
-    )
-    eff_table = table if table is not None else bool(
-        getattr(settings, "mineru_table_enabled", True)
-    )
+    eff_formula = formula if formula is not None else settings.mineru_formula_enabled
+    eff_table = table if table is not None else settings.mineru_table_enabled
     return eff_formula, eff_table
 
 

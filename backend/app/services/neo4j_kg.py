@@ -105,7 +105,7 @@ def is_enabled() -> bool:
     try:
         from ..config import get_settings
 
-        _enabled = bool(get_settings().neo4j_enabled)
+        _enabled = get_settings().neo4j_enabled
         return _enabled
     except Exception:
         pass

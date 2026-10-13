@@ -171,7 +171,7 @@ def _without_table_markup(text: str) -> str:
 def chunk_floor() -> int:
     """The shortest chunk body the gate keeps: ``max(20, min_snippet_chars // 2)`` - softer than literature's
     ``title + snippet`` floor because a stored chunk can be a short technical paragraph."""
-    base = int(getattr(get_settings(), "content_filter_min_snippet_chars", 40) or 40)
+    base = int(get_settings().content_filter_min_snippet_chars or 40)
     return max(20, base // 2)
 
 
@@ -278,7 +278,7 @@ def drop_reason_for_chunk(
 ) -> str | None:
     """Return a drop reason string, or None if the chunk may stay."""
     settings = get_settings()
-    if not bool(getattr(settings, "content_filter_enabled", True)):
+    if not settings.content_filter_enabled:
         return None
 
     sid = getattr(chunk, "source_id", None) or ""
@@ -310,7 +310,7 @@ def gate_chunk_indices(
     if top_k <= 0:
         return []
     settings = get_settings()
-    if not bool(getattr(settings, "content_filter_enabled", True)):
+    if not settings.content_filter_enabled:
         return order[:top_k]
 
     source_ids = [getattr(chunks[i], "source_id", "") for i in order if 0 <= i < len(chunks)]
@@ -341,7 +341,7 @@ def ingest_block_reason_for_source(source_id: str | None) -> str | None:
     origin is clean. Wiki is intentionally not blocked here.
     """
     settings = get_settings()
-    if not bool(getattr(settings, "content_filter_enabled", True)):
+    if not settings.content_filter_enabled:
         return None
     sid = (source_id or "").strip()
     if not sid:
@@ -365,7 +365,7 @@ def gate_ingest_rows(
     nothing remains, else None (partial keep). Disabled filter → identity.
     """
     settings = get_settings()
-    if not bool(getattr(settings, "content_filter_enabled", True)):
+    if not settings.content_filter_enabled:
         return rows, None
 
     block = ingest_block_reason_for_source(source_id)

@@ -25,7 +25,7 @@ def _get_client():
         from ..config import get_settings
 
         settings = get_settings()
-        if not getattr(settings, "langfuse_enabled", False):
+        if not settings.langfuse_enabled:
             return None
         pk = (settings.langfuse_public_key or "").strip()
         sk = (settings.langfuse_secret_key or "").strip()

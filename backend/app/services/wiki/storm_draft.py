@@ -95,8 +95,8 @@ def collect_section_evidence(
     from ...config import get_settings
 
     settings = get_settings()
-    query_k = max(1, int(getattr(settings, "wiki_storm_section_query_k", 6) or 6))
-    cap = int(top_k if top_k is not None else getattr(settings, "wiki_storm_section_evidence_cap", 10) or 10)
+    query_k = max(1, int(settings.wiki_storm_section_query_k or 6))
+    cap = int(top_k if top_k is not None else settings.wiki_storm_section_evidence_cap or 10)
     cap = max(1, min(cap, 24))
     skip = exclude_ids or set()
     hits: list[dict[str, str]] = []
@@ -124,7 +124,7 @@ def collect_section_evidence(
                     )
                     or []
                 )
-            if pool and bool(getattr(settings, "wiki_storm_section_rerank", False)):
+            if pool and settings.wiki_storm_section_rerank:
                 try:
                     from ...services.rag import rerank_scored
 

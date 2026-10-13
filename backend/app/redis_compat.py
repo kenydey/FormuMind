@@ -31,7 +31,7 @@ def protocol() -> int:
     try:
         from .config import get_settings
 
-        value = int(get_settings().redis_protocol)
+        value = get_settings().redis_protocol
     except Exception:  # noqa: BLE001 - a client must still be buildable when settings are not
         return 2
     return value if value in (2, 3) else 2

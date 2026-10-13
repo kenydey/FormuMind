@@ -252,7 +252,7 @@ def get_setup_status() -> dict:
     auth_ready = bool(lib_ok and s.notebooklm_enabled and session_present)
     base = {
         "lib_installed": lib_ok,
-        "enabled": bool(s.notebooklm_enabled),
+        "enabled": s.notebooklm_enabled,
         # Legacy global notebook id (migration only). Prefer per-project ids.
         "notebook_id_set": bool(s.notebooklm_notebook_id),
         "notebook_id": s.notebooklm_notebook_id,

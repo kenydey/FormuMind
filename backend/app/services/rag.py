@@ -314,7 +314,7 @@ class BM25FAISSStore:
             try:
                 from ..config import get_settings
 
-                w = float(get_settings().kb_hybrid_alpha)
+                w = get_settings().kb_hybrid_alpha
             except Exception:
                 w = 0.3
         return min(1.0, max(0.0, w))
@@ -596,7 +596,7 @@ def llm_rerank(
     try:
         from ..config import get_settings
 
-        _plugin_on = bool(getattr(get_settings(), "rerank_plugin_enabled", False))
+        _plugin_on = get_settings().rerank_plugin_enabled
     except Exception:
         _plugin_on = False
     if _plugin_on and k <= 50:
@@ -821,7 +821,7 @@ def rerank_scored(
         return [], {"applied": False, "backend": "none", "reason": "empty"}
 
     want_ce = backend == "cross_encoder" or (
-        backend == "auto" and bool(settings.cross_encoder_rerank_enabled)
+        backend == "auto" and settings.cross_encoder_rerank_enabled
     )
     # v29 Phase5: 默认启用时，只在模型已缓存时用 cross-encoder，
     # 避免生产首次查询触发大模型下载。显式指定 backend=cross_encoder 时仍尝试加载。

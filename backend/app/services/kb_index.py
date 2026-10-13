@@ -227,7 +227,7 @@ def _sync_source_fts(source_id: str, rows: list[dict], settings) -> None:
     Fail-open by construction (``index_source_chunks`` never raises); an empty
     ``rows`` clears stale FTS rows for the source.
     """
-    if not getattr(settings, "source_fts_enabled", True):
+    if not settings.source_fts_enabled:
         return
     try:
         from .source_fts import index_source_chunks
@@ -865,7 +865,7 @@ def index_source(
             except Exception as wiki_exc:
                 degrade_return(logger, wiki_exc, "wiki compile dispatch failed", None)
         # P4.2: optional project-dossier S2 patch (default OFF via wiki_dossier_auto_patch).
-        if n and settings.wiki_enabled and getattr(settings, "wiki_project_dossier_enabled", False):
+        if n and settings.wiki_enabled and settings.wiki_project_dossier_enabled:
             try:
                 from ..db.source_store import get_source_store
                 from .wiki.dossier import notify_dossier_event
@@ -1353,9 +1353,9 @@ def search_chunks_hybrid(
 
         settings = get_settings()
         if alpha is None:
-            alpha = float(settings.kb_hybrid_alpha)
+            alpha = settings.kb_hybrid_alpha
         if children:
-            mult = max(1, int(getattr(settings, "kb_children_candidate_mult", 3) or 3))
+            mult = max(1, int(settings.kb_children_candidate_mult or 3))
             scored = hybrid_search_scored(
                 query,
                 top_k=k * mult,
@@ -1379,7 +1379,7 @@ def search_chunks_hybrid(
         # v10: RRF 模式 hybrid_score ~0.01-0.03，按本次 batch max 归一化后再转 Evidence，
         # 保留相对排序。默认 weighted 下分数 0-1，此分支不执行。
         scores = [float(s.hybrid_score) for s in scored]
-        if (getattr(settings, "kb_hybrid_fusion", "weighted") or "weighted").strip().lower() == "rrf":
+        if (settings.kb_hybrid_fusion or "weighted").strip().lower() == "rrf":
             _mx = max(scores) if scores else 0.0
             if _mx > 0:
                 scores = [x / _mx for x in scores]
@@ -1520,7 +1520,7 @@ def retrieve_evidence(
         )
     settings = get_settings()
     if children is None:
-        children = bool(getattr(settings, "kb_children_retrieval_enabled", False))
+        children = settings.kb_children_retrieval_enabled
     # Round 3 Wave 1 — agentic iterative retrieval. Root-cause note: the plan
     # named paperqa_engine as the split point, but paperqa_engine only
     # *synthesizes* from provided sources; this façade is the actual single-shot
@@ -1569,11 +1569,11 @@ def retrieve_evidence(
             children=bool(children),
             source_meta=meta,
         )
-    if getattr(settings, "kb_patent_stitch_enabled", True):
+    if settings.kb_patent_stitch_enabled:
         evidence = _stitch_patent_siblings(
             evidence,
             max_siblings=int(
-                getattr(settings, "kb_patent_stitch_max_siblings", 2) or 2
+                settings.kb_patent_stitch_max_siblings or 2
             ),
             meta=meta,
         )
@@ -1747,14 +1747,12 @@ def kb_stats() -> dict:
             pending_products = degrade_return(
                 logger, exc, "pending-structure count failed", 0
             )
-        scan_limit = int(getattr(settings, "kb_search_scan_limit", 5000) or 5000)
+        scan_limit = int(settings.kb_search_scan_limit or 5000)
         pressure = (
             min(1.0, float(chunks_active) / float(scan_limit)) if scan_limit > 0 else 0.0
         )
-        retention_days = int(getattr(settings, "kb_archive_retention_days", 0) or 0)
-        dual_write = bool(
-            getattr(settings, "materials_suppliers_json_dual_write", True)
-        )
+        retention_days = int(settings.kb_archive_retention_days or 0)
+        dual_write = settings.materials_suppliers_json_dual_write
         return {
             "enabled": kb_enabled(),
             "sources": int(sources),

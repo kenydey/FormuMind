@@ -124,7 +124,7 @@ def _scale_up_headers(settings, provider: str, timeout: float) -> dict[str, str]
     """
     if provider != CUSTOM_PROVIDER:
         return {}
-    configured = int(getattr(settings, "vision_scale_up_timeout", 0) or 0)
+    configured = int(settings.vision_scale_up_timeout or 0)
     if configured <= 0:
         return {}
     budget = int(max(1.0, timeout - 30.0))
@@ -136,7 +136,7 @@ def _text_config(settings) -> RoleConfig:
     override = effective_setting(settings, "llm_base_url")
     if provider == CUSTOM_PROVIDER and not override:
         override = effective_setting(settings, "custom_base_url")
-    timeout = float(settings.llm_timeout_seconds)
+    timeout = settings.llm_timeout_seconds
     return RoleConfig(
         role=TEXT,
         provider=provider,
@@ -144,7 +144,7 @@ def _text_config(settings) -> RoleConfig:
         api_key=_key_for_provider(settings, provider),
         base_url=_provider_base_url(provider, override),
         timeout=timeout,
-        max_tokens=int(settings.llm_max_tokens),
+        max_tokens=settings.llm_max_tokens,
         extra_headers=_scale_up_headers(settings, provider, timeout),
     )
 

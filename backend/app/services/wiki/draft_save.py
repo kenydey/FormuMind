@@ -71,7 +71,7 @@ def save_chat_draft(
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_chat_save_draft", False):
+    if not settings.wiki_chat_save_draft:
         raise PermissionError("wiki_chat_save_draft is false")
 
     pid = (project_id or "").strip()

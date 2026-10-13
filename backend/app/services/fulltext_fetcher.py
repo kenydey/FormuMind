@@ -344,7 +344,7 @@ def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | No
         return None
     settings = get_settings()
     params: dict[str, str] = {}
-    key = getattr(settings, "openalex_api_key", None)
+    key = settings.openalex_api_key
     if key:
         params["api_key"] = key
     elif settings.openalex_mailto:
@@ -377,8 +377,8 @@ def _openalex_content_text(
     parsed tables for the ingest sidecar instead of dropping them.
     """
     settings = get_settings()
-    api_key = getattr(settings, "openalex_api_key", None)
-    if not api_key or not getattr(settings, "openalex_content_enabled", True):
+    api_key = settings.openalex_api_key
+    if not api_key or not settings.openalex_content_enabled:
         return None
 
     ident = ev.identifier or ""
@@ -701,7 +701,7 @@ def _dispatch_fetch(
             # quota. Acceptable for a resource guardrail, and the alternative
             # (changing `fetch_patent_text`'s return type) ripples into callers
             # and tests for no functional gain.
-            prefer_html = bool(getattr(get_settings(), "patent_prefer_html", True))
+            prefer_html = get_settings().patent_prefer_html
             _set_acquisition("html" if prefer_html else _ACQ_PDF)
         return hit
     if kind == "literature":
@@ -996,9 +996,9 @@ def enrich_search_results(
         return evidence, report
 
     limit = max_docs if max_docs is not None else settings.fulltext_max_docs
-    timeout = float(settings.fulltext_timeout_s)
+    timeout = settings.fulltext_timeout_s
     # v2 决策②：pdf_quota 不再作为降级门 —— 超限只记监控告警，不降级。
-    pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
+    pdf_quota = int(settings.kb_project_pdf_quota or 0)
     if project_id and pdf_quota > 0:
         try:
             from ..db.source_store import get_source_store

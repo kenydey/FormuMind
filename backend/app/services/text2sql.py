@@ -674,7 +674,7 @@ def hybrid_answer(
     from ..config import get_settings
 
     settings = settings or get_settings()
-    if not getattr(settings, "text2sql_routing_enabled", True):
+    if not settings.text2sql_routing_enabled:
         ev = evidence if evidence is not None else []
         return {
             "route": "disabled",

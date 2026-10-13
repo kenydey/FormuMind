@@ -78,7 +78,7 @@ def _require_dossier_enabled() -> None:
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise PermissionError("wiki_project_dossier_enabled is false")
 
 
@@ -290,7 +290,7 @@ def render_section(section: str, pack: dict[str, Any]) -> str:
             lines.append("  （草稿不进 Claims/DOE；审阅后可手动编入 S2/S8 或编译主题。）")
         if not lines:
             lines.append("- 主要切片已有数据；请人工 review 后勾选 reviewed。")
-        ap = bool(getattr(get_settings(), "wiki_dossier_auto_patch", False))
+        ap = get_settings().wiki_dossier_auto_patch
         if ap:
             lines.append(
                 "- 自动 patch **已开**（白名单事件：project/literature/DOE/lab/loop/"
@@ -798,10 +798,10 @@ def notify_dossier_event(
     settings = get_settings()
     if not settings.wiki_enabled:
         return {"ok": False, "skipped": True, "reason": "wiki_disabled", "event": event}
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         return {"ok": False, "skipped": True, "reason": "dossier_disabled", "event": event}
 
-    global_on = bool(getattr(settings, "wiki_dossier_auto_patch", False))
+    global_on = settings.wiki_dossier_auto_patch
     project_on = False
     pid = (project_id or "").strip()
     if not global_on and pid:

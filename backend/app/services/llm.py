@@ -363,7 +363,7 @@ def list_remote_models(
         remote_ids = fetch_openai_compatible_model_ids(
             effective_base or "https://api.openai.com/v1",
             key,
-            timeout=float(settings.llm_timeout_seconds),
+            timeout=settings.llm_timeout_seconds,
         )
         if not remote_ids:
             return {
@@ -458,7 +458,7 @@ class LLMConfigError(Exception):
 # ── Low-level completion helpers ─────────────────────────────────────────────
 
 def _llm_timeout_seconds() -> float:
-    return float(get_settings().llm_timeout_seconds)
+    return get_settings().llm_timeout_seconds
 
 
 _LLM_RETRY = tenacity_retry(
@@ -1915,16 +1915,16 @@ def answer_question(
     recalled = store.query(_rerank_q, k=candidates_n) or sources[:candidates_n]
 
     relevant = recalled[: settings.chat_rerank_top_k]
-    if bool(getattr(settings, "chat_cross_encoder_enabled", False)) and recalled:
+    if settings.chat_cross_encoder_enabled and recalled:
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
-        timeout_s = float(getattr(settings, "cross_encoder_timeout_s", 2.5) or 2.5)
+        timeout_s = float(settings.cross_encoder_timeout_s or 2.5)
         try:
             from .rag import rerank_scored
 
             max_cands = max(
                 1,
-                int(getattr(settings, "cross_encoder_max_candidates", 30) or 30),
+                int(settings.cross_encoder_max_candidates or 30),
             )
             pool = recalled[:max_cands]
 

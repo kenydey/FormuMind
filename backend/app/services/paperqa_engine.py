@@ -33,7 +33,7 @@ def _settings():
 
 def paperqa_enabled(settings: Any | None = None) -> bool:
     s = settings or _settings()
-    return bool(getattr(s, "paperqa_enabled", True))
+    return s.paperqa_enabled
 
 
 def _has_llm_credentials(settings: Any) -> bool:
@@ -69,7 +69,7 @@ def _resolve_llm_bundle(settings: Any) -> dict[str, Any]:
 
     provider = str(effective_setting(settings, "llm_provider") or "openai")
     model = str(
-        getattr(settings, "paperqa_llm_model", None)
+        settings.paperqa_llm_model
         or effective_setting(settings, "llm_model")
         or "gpt-4o-mini"
     ).strip()
@@ -77,7 +77,7 @@ def _resolve_llm_bundle(settings: Any) -> dict[str, Any]:
     base_url = _resolve_openai_base_url(
         provider, effective_setting(settings, "llm_base_url")
     )
-    embedding = str(getattr(settings, "paperqa_embedding", None) or "").strip()
+    embedding = str(settings.paperqa_embedding or "").strip()
     openai_key = effective_setting(settings, "openai_api_key")
     if not embedding:
         # Prefer OpenAI embeddings only when an OpenAI key exists; else mark empty

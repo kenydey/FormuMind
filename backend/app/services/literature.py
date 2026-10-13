@@ -487,7 +487,7 @@ def search_internet(query: str, limit: int = 5, offset: int = 0) -> list[Evidenc
             return hits
         logger.info("internet search: SerpAPI returned nothing, trying next provider")
 
-    if not getattr(settings, "web_search_allow_ddgs", True):
+    if not settings.web_search_allow_ddgs:
         logger.info(
             "internet search: no keyed provider produced results and the "
             "DuckDuckGo fallback is disabled — returning nothing"
@@ -689,7 +689,7 @@ def _merge_filter_rank(
     from ..config import get_settings
 
     profile = resolve_profile(domain)
-    deny_on = bool(getattr(get_settings(), "kb_search_deny_enabled", True))
+    deny_on = get_settings().kb_search_deny_enabled
 
     def _keep(e: Evidence) -> bool:
         text = f"{e.title} {e.snippet} {e.identifier}"
@@ -873,7 +873,7 @@ def openalex_arms(
     except Exception:
         profile = None
 
-    if not getattr(settings, "openalex_multi_arm", True):
+    if not settings.openalex_multi_arm:
         return search_openalex(
             " ".join(terms or ()), limit, offset,
             domain=domain, preferred_source_ids=preferred_source_ids,
@@ -922,7 +922,7 @@ def openalex_arms(
                 merged.extend(rows)
     merged = _dedupe_evidence(merged)
 
-    if deferred and offset == 0 and len(merged) < int(settings.openalex_arm_broad_threshold):
+    if deferred and offset == 0 and len(merged) < settings.openalex_arm_broad_threshold:
         for arm in deferred:
             _openalex_bucket.acquire(max(1, (limit + 24) // 25))
             rows = search_openalex(
@@ -1132,7 +1132,7 @@ def iter_search(
     from ..config import get_settings
 
     _cache_settings = get_settings()
-    cache_ttl_s = int(getattr(_cache_settings, "search_cache_ttl_s", 600) or 0)
+    cache_ttl_s = int(_cache_settings.search_cache_ttl_s or 0)
     domain_hint = getattr(req, "domain", None) if req is not None else None
     cache_key = _search_cache_key(
         query, source_types, total_limit, per_source_cap, domain_hint, req,
@@ -1261,10 +1261,10 @@ def iter_search(
     # llm_quality_judge 之前，先做多样性可省 judge token。flag 默认关闭。
     mmr_applied = False
     try:
-        if getattr(settings, "search_mmr_enabled", False) and len(final) > 1:
+        if settings.search_mmr_enabled and len(final) > 1:
             from .recommend_diversity import select_diverse_mmr_text
 
-            mmr_lambda = float(getattr(settings, "search_mmr_lambda", 0.7) or 0.7)
+            mmr_lambda = float(settings.search_mmr_lambda or 0.7)
             reranked = select_diverse_mmr_text(
                 final, min(len(final), total_limit), lambda_score=mmr_lambda
             )
@@ -1400,7 +1400,7 @@ def read_passages(
         fetched_now = False
         if doc is None or not getattr(doc, "full_text", None):
             # On-demand fetch, gated by fulltext_enrich — no silent downloads.
-            if not getattr(settings, "fulltext_enrich", False):
+            if not settings.fulltext_enrich:
                 meta["reason"] = "no_fulltext"
                 return [], meta
             from .fulltext_fetcher import enrich_search_results
@@ -1439,8 +1439,8 @@ def read_passages(
         passage_origin = "enrich" if from_enrich else "ondemand"
         chunks = chunk_markdown(
             doc.full_text,
-            max_chars=int(getattr(settings, "ingest_chunk_max_chars", 1600) or 1600),
-            overlap=int(getattr(settings, "ingest_chunk_overlap", 200) or 200),
+            max_chars=int(settings.ingest_chunk_max_chars or 1600),
+            overlap=int(settings.ingest_chunk_overlap or 200),
         )
         passages: list[Passage] = []
         seen_pages: set = set()
@@ -1691,12 +1691,12 @@ def get_source_availability() -> dict[str, dict]:
         },
         "notebooklm": get_setup_status(),
         "surechembl": {
-            "available": bool(getattr(s, "surechembl", True)),
+            "available": s.surechembl,
             "offline_fallback": False,
-            "reason": None if getattr(s, "surechembl", True) else "disabled",
+            "reason": None if s.surechembl else "disabled",
             "hint": (
                 None
-                if getattr(s, "surechembl", True)
+                if s.surechembl
                 else "FORMUMIND_SURECHEMBL=false；开启后检索专利化学标注文档"
             ),
         },

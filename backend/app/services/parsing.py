@@ -94,8 +94,8 @@ def _maybe_extract_embedded_structures(result: ParseResult, content: bytes) -> P
         from ..config import get_settings
 
         settings = get_settings()
-        vision_allowed = bool(getattr(settings, "pdf_embedded_image_vision", False))
-        ocsr_enabled = bool(getattr(settings, "ocsr_enabled", True))
+        vision_allowed = settings.pdf_embedded_image_vision
+        ocsr_enabled = settings.ocsr_enabled
         from . import pdf_local
     except Exception:
         return result
@@ -188,7 +188,7 @@ def _maybe_extract_tables(result: ParseResult, content: bytes) -> ParseResult:
     try:
         if not result.ok:
             return result
-        if not getattr(get_settings(), "table_extract_enabled", True):
+        if not get_settings().table_extract_enabled:
             return result
         from . import table_contract as _tc
         blocks = _tc.blocks_from_markdown(result.markdown or "")
@@ -284,9 +284,7 @@ def _parse_docling(content: bytes) -> str | None:
 
                 opts = PdfPipelineOptions()
                 if hasattr(opts, "do_formula_enrichment"):
-                    opts.do_formula_enrichment = bool(
-                        get_settings().pdf_formula_enrichment
-                    )
+                    opts.do_formula_enrichment = get_settings().pdf_formula_enrichment
                 format_options[InputFormat.PDF] = PdfFormatOption(pipeline_options=opts)
             except Exception:  # options API drift — plain defaults still work
                 format_options = {}
@@ -1474,7 +1472,7 @@ def parser_availability() -> dict[str, bool]:
         # Phase 1: the mineru tier is the cloud SDK backend — "available" now
         # means SDK importable AND enabled with a token (the old magic_pdf
         # local path was never installed; availability key set is unchanged).
-        "mineru": optional_import("mineru") and bool(get_settings().mineru_enabled),
+        "mineru": optional_import("mineru") and get_settings().mineru_enabled,
         "rapidocr": _local_ocr_installed(),
         "markitdown": optional_import("markitdown"),
         "pypdf": optional_import("pypdf"),

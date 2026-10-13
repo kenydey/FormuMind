@@ -16,7 +16,7 @@ _CHUNK_BYTES = 1024 * 1024
 
 def upload_limit_bytes() -> int:
     """Per-file cap from Settings (``ingest_max_upload_bytes``, default 20 MiB)."""
-    return int(get_settings().ingest_max_upload_bytes)
+    return get_settings().ingest_max_upload_bytes
 
 
 def too_large(filename: str, limit: int) -> HTTPException:

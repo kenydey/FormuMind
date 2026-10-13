@@ -85,7 +85,7 @@ def content_hash(markdown: str) -> str:
 
 
 def preflight_enabled(settings: Any) -> bool:
-    return bool(getattr(settings, "publication_preflight_enabled", True))
+    return settings.publication_preflight_enabled
 
 
 def _defined_footnote_indices(markdown: str) -> set[int]:
@@ -144,9 +144,9 @@ def _locator_preflight_mode(settings: Any | None) -> str:
             return "blocking"
         if mode in ("warning", "warn", "major"):
             return "warning"
-    if not bool(getattr(settings, "citation_locator_preflight_enabled", True)):
+    if not settings.citation_locator_preflight_enabled:
         return "off"
-    if bool(getattr(settings, "citation_locator_preflight_blocking", False)):
+    if settings.citation_locator_preflight_blocking:
         return "blocking"
     return "warning"
 
@@ -288,9 +288,7 @@ def run_checks(
             )
 
     # W1-9 预留钩子：artifact 可复现性审计（默认关闭，fail-open）
-    if audit_artifact_dict is not None and bool(
-        getattr(settings, "preflight_artifact_audit_enabled", False)
-    ):
+    if audit_artifact_dict is not None and settings.preflight_artifact_audit_enabled:
         try:
             from .artifact_audit import audit_artifact  # W1-9 未实施时跳过
         except ImportError:  # noqa: BLE001

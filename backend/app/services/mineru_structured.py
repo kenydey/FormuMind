@@ -144,7 +144,7 @@ def formula_gatekeeper(structured: MinerUStructured) -> GatekeeperReport:
                 "(llm=%s)",
                 report.empty_latex_blocks,
                 report.regex_catches,
-                bool(get_settings().formula_gatekeeper_llm_enabled),
+                get_settings().formula_gatekeeper_llm_enabled,
             )
 
         if get_settings().formula_gatekeeper_llm_enabled and (
@@ -220,7 +220,7 @@ def _doc_is_clean(content: bytes) -> bool:
     lengths = _page_text_lengths(content)
     if not lengths:
         return False  # cannot judge → do not skip
-    threshold = int(settings.mineru_cloud_min_chars_per_page)
+    threshold = settings.mineru_cloud_min_chars_per_page
     clean = all(n >= threshold for n in lengths)
     if clean:
         logger.info(

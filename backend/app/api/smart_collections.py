@@ -43,7 +43,7 @@ def _auto_refresh_worker(project_id: str, collection_id: str) -> None:
 def _kick_auto_refresh(project_id: str, collections: list[dict] | None) -> None:
     """为到期且未在刷新的集合各起一个 daemon 线程做后台刷新。"""
     try:
-        enabled = bool(get_settings().smart_collections_auto_refresh)
+        enabled = get_settings().smart_collections_auto_refresh
     except Exception:  # noqa: BLE001
         return
     if not enabled:

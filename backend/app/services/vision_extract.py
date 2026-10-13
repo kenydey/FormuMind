@@ -22,7 +22,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..config import get_settings
+from ..config import get_settings, source_checkout_mode
 from ..domain.multimodal_schemas import VisionTableExtraction
 from .errors import degrade_return
 from .kg.prompts import build_multimodal_table_prompt
@@ -450,7 +450,7 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
         # （OpenCV 报 !src.empty()）。/app/data 两容器都挂载；源码模式
         # host 写仓库根 data/（同一挂载源双视角）。用 FORMUMIND_ENV_FILE
         # 标志区分（不能用 /app/data 存在性——host 可能残留孤儿目录）。
-        if os.environ.get("FORMUMIND_ENV_FILE"):
+        if source_checkout_mode():
             # __file__ = <root>/backend/app/services/vision_extract.py
             _root = os.path.dirname(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -469,7 +469,7 @@ def _ocsr_direct(content: bytes, settings) -> VisionExtraction | None:
             # 容器视角路径：worker(molscribe 容器) 读 /app/data；host 源码
             # 模式写的是仓库根 data/（同一挂载双视角），投递前转换。
             worker_path = path
-            if os.environ.get("FORMUMIND_ENV_FILE"):
+            if source_checkout_mode():
                 _root = os.path.dirname(
                     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 )

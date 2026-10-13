@@ -40,7 +40,7 @@ FEATURE_SET_V2 = "v2-desc"
 def _descriptor_features_enabled() -> bool:
     from ..config import get_settings
 
-    return bool(get_settings().chemtools_descriptor_features)
+    return get_settings().chemtools_descriptor_features
 
 
 def feature_set_version() -> str:

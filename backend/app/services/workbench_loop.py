@@ -45,7 +45,7 @@ def should_trigger_loop_after_sync(
         return False
     if trigger_loop is not None:
         return bool(trigger_loop)
-    if bool(get_settings().auto_loop_on_sync):
+    if get_settings().auto_loop_on_sync:
         return True
     return _project_auto_loop_on(project_id)
 
@@ -372,7 +372,7 @@ def pause_resume_doecyle(campaign_id: int, is_paused: bool, *, ttl_hours: float 
     try:
         if is_paused:
             if ttl_hours is None:
-                ttl_hours = float(get_settings().doe_cycle_pause_ttl_hours)
+                ttl_hours = get_settings().doe_cycle_pause_ttl_hours
             state = store.set_paused(campaign_id, ttl_hours=ttl_hours)
             logger.info(
                 "DOE cycle for campaign %s paused (%s)",

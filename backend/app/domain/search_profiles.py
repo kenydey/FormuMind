@@ -410,7 +410,7 @@ def profile_enabled() -> bool:
     """True when domain_profile_search flag is on (default True once wired)."""
     try:
         from ..config import get_settings
-        return bool(getattr(get_settings(), "domain_profile_search", True))
+        return get_settings().domain_profile_search
     except Exception:
         return True
 

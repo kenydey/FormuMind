@@ -14,12 +14,13 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 import platform
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ..config import task_dir as _task_persist_dir
 
 logger = logging.getLogger(__name__)
 
@@ -171,10 +172,6 @@ def _gather_doe(project_id: str) -> tuple[str, list[str]]:
         else:
             missing.append(f"DOE 方案 {str(item.get('plan_id', ''))[:8]} 无试验矩阵")
     return "\n".join(parts), missing
-
-
-def _task_persist_dir() -> Path:
-    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
 
 
 def _gather_optimization(project_id: str) -> tuple[str, list[str]]:

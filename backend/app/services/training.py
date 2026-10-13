@@ -258,7 +258,7 @@ class ModelRegistry:
         return rows
 
     def _persist_enabled(self) -> bool:
-        return bool(getattr(get_settings(), "model_persist_enabled", True))
+        return get_settings().model_persist_enabled
 
     def _try_load_cached(
         self,

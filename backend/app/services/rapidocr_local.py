@@ -108,7 +108,7 @@ def _engine():
         try:
             from rapidocr import RapidOCR  # type: ignore
 
-            threads = max(1, int(get_settings().rapidocr_threads))
+            threads = max(1, get_settings().rapidocr_threads)
             # ONNX Runtime defaults intra_op threads to *every* core. On a
             # 4-core host that means an OCR pass starves the web workers it
             # shares the box with. Thread count does not affect peak memory
@@ -248,7 +248,7 @@ def ocr_pdf(content: bytes) -> str | None:
     total = pdf_local.page_count(content)
     if total <= 0:
         return None
-    cap = int(settings.rapidocr_max_pages)
+    cap = settings.rapidocr_max_pages
     if total > cap:
         logger.warning("rapidocr: %d-page document capped at %d pages", total, cap)
         # P2: 截断用户可见。
@@ -256,7 +256,7 @@ def ocr_pdf(content: bytes) -> str | None:
 
         note(f"文档共 {total} 页，OCR 上限 {cap} 页，仅解析前 {cap} 页")
 
-    dpi = int(settings.rapidocr_dpi)
+    dpi = settings.rapidocr_dpi
     rendered: list[tuple[int, str]] = []
     for page_no in range(1, min(total, cap) + 1):
         png = pdf_local.page_as_png(content, page_no, dpi=dpi)

@@ -14,7 +14,7 @@ def project_paths(paths: list[str]) -> dict:
     settings = get_settings()
     if (
         not settings.wiki_enabled
-        or not getattr(settings, "wiki_neo4j_project", False)
+        or not settings.wiki_neo4j_project
         or not settings.neo4j_enabled
     ):
         return {"ok": False, "reason": "disabled", "projected": 0}

@@ -5,12 +5,12 @@ Failures degrade to an empty list.
 """
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
 from loguru import logger
 
+from ..config import get_settings
 from ..db.material_store import norm_key
 from ..domain.knowledge import RAW_MATERIALS
 
@@ -18,13 +18,7 @@ _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 
 
 def substitute_llm_enabled() -> bool:
-    try:
-        from ..config import get_settings
-
-        return bool(get_settings().substitute_llm)
-    except Exception:
-        raw = (os.environ.get("FORMUMIND_SUBSTITUTE_LLM") or "true").strip().lower()
-        return raw not in {"0", "false", "no", "off"}
+    return get_settings().substitute_llm
 
 
 def _match_catalog(name: str) -> tuple[bool, str | None]:

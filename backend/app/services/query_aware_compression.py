@@ -265,13 +265,13 @@ def _compress_evidence(
 
 def query_compress_enabled(settings: Any) -> bool:
     """W5-1 kill-switch. Defaults ON (tier 1 is cheap and fail-open)."""
-    return bool(getattr(settings, "query_compress_enabled", True))
+    return settings.query_compress_enabled
 
 
 def query_compress_token_budget(settings: Any) -> int:
     """Token budget for compression; falls back to the module default."""
     try:
-        value = int(getattr(settings, "query_compress_token_budget", DEFAULT_TOKEN_BUDGET))
+        value = settings.query_compress_token_budget
     except (TypeError, ValueError):
         return DEFAULT_TOKEN_BUDGET
     return value if value > 0 else DEFAULT_TOKEN_BUDGET
@@ -282,7 +282,7 @@ def query_compress_llm_enabled(settings: Any) -> bool:
 
     Override with ``FORMUMIND_QUERY_COMPRESS_LLM_ENABLED=false``.
     """
-    return bool(getattr(settings, "query_compress_llm_enabled", False))
+    return settings.query_compress_llm_enabled
 
 
 # --- tier 2: LLM rewrite layer ---
@@ -317,7 +317,7 @@ Passages:
 
 def _reviewer_model(settings: Any) -> str | None:
     """Small/cheap model for compression (W5-2). Empty → inherit chat model."""
-    raw = getattr(settings, "evidence_reviewer_model", "") or ""
+    raw = settings.evidence_reviewer_model or ""
     model = str(raw).strip()
     return model or None
 

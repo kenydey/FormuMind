@@ -22,11 +22,11 @@ def _require_storm_enabled() -> None:
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise PermissionError("wiki_project_dossier_enabled is false")
-    if not getattr(settings, "wiki_dossier_report_enabled", False):
+    if not settings.wiki_dossier_report_enabled:
         raise PermissionError("wiki_dossier_report_enabled is false")
-    if not getattr(settings, "wiki_storm_report_enabled", False):
+    if not settings.wiki_storm_report_enabled:
         raise PermissionError("wiki_storm_report_enabled is false")
 
 
@@ -150,7 +150,7 @@ def _maybe_regenerate_failed_sections(
     from ...config import get_settings
 
     settings = get_settings()
-    if not bool(getattr(settings, "wiki_storm_claim_regenerate", False)):
+    if not settings.wiki_storm_claim_regenerate:
         return markdown, cite_ids, claim_meta
     if not claim_meta.get("needs_regenerate"):
         return markdown, cite_ids, claim_meta
@@ -242,18 +242,18 @@ def run_storm_report(
     max_sec = int(
         max_sections
         if max_sections is not None
-        else getattr(settings, "wiki_storm_max_sections", 6) or 6
+        else settings.wiki_storm_max_sections or 6
     )
     max_sec = max(3, min(max_sec, 12))
     parallel_use = (
         bool(parallel)
         if parallel is not None
-        else bool(getattr(settings, "wiki_storm_parallel", False))
+        else settings.wiki_storm_parallel
     )
     workers = int(
         max_workers
         if max_workers is not None
-        else getattr(settings, "wiki_storm_parallel_workers", 3) or 3
+        else settings.wiki_storm_parallel_workers or 3
     )
     workers = max(1, min(workers, 8))
 
@@ -297,7 +297,7 @@ def run_storm_report(
         outline, drafts, pack, progress_cb=progress_cb
     )
     claim_meta: dict[str, Any] = {"applied": False}
-    if getattr(settings, "wiki_storm_claim_check", True):
+    if settings.wiki_storm_claim_check:
         try:
             claim_meta = _storm_claim_check(outline.topic, markdown, pack, cite_ids)
             if claim_meta.get("markdown"):

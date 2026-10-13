@@ -151,7 +151,7 @@ def _configure_layout() -> None:
     try:
         import pymupdf4llm  # type: ignore
 
-        wanted = bool(get_settings().pdf_layout_analysis)
+        wanted = get_settings().pdf_layout_analysis
         # 首次或设置变化时重新配置
         if not _layout_configured or _layout_last_wanted != wanted:
             if getattr(pymupdf4llm, "_use_layout", None) is not wanted:

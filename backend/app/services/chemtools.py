@@ -76,7 +76,7 @@ _CAS_RE = re.compile(r"\b\d{2,7}-\d{2}-\d\b")
 
 def gateway_enabled() -> bool:
     """True when the gateway switch is on (independent of installed libs)."""
-    return bool(get_settings().chemtools_enabled)
+    return get_settings().chemtools_enabled
 
 
 def rdkit_available() -> bool:
@@ -142,7 +142,7 @@ def availability() -> dict[str, Any]:
             "explosive_check": cap(pubchem, pubchem_hint),
         },
         "chat_tool_calling": {
-            "flag_enabled": bool(getattr(get_settings(), "chat_chem_tools_enabled", True)),
+            "flag_enabled": get_settings().chat_chem_tools_enabled,
             "chemtools_enabled": bool(enabled),
             "note": "实际启用还取决于当前 LLM 是否为 OpenAI 兼容供应商",
         },
@@ -165,7 +165,7 @@ def _executor() -> concurrent.futures.ThreadPoolExecutor:
 
 def _run_with_timeout(fn: Callable[[], T], default: T) -> T:
     """Run *fn* on the gateway executor with the configured hard timeout."""
-    timeout = float(get_settings().chemtools_timeout_s)
+    timeout = get_settings().chemtools_timeout_s
     future = _executor().submit(fn)
     try:
         return future.result(timeout=timeout)
@@ -233,7 +233,7 @@ def _pubchem_get(path: str) -> Any | None:
     if time.monotonic() < _pubchem_down_until:
         return None
     url = path if path.startswith("http") else f"{_PUBCHEM_BASE}{path}"
-    timeout = float(get_settings().chemtools_timeout_s)
+    timeout = get_settings().chemtools_timeout_s
     try:
         # A reachable PubChem accepts the connection in milliseconds; waiting longer than a few seconds for the *connect*
         # only means nobody is there. The read timeout stays as configured.

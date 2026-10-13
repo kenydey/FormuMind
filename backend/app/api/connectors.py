@@ -70,8 +70,8 @@ def list_all() -> dict:
     return {
         "builtin": connectors_builtin.list_connectors(settings=settings),
         "mcp": mcp_client.list_mcp_servers(),
-        "mcp_client_enabled": bool(getattr(settings, "mcp_client_enabled", False)),
-        "connectors_builtin_enabled": bool(getattr(settings, "connectors_builtin_enabled", True)),
+        "mcp_client_enabled": settings.mcp_client_enabled,
+        "connectors_builtin_enabled": settings.connectors_builtin_enabled,
     }
 
 
@@ -95,7 +95,7 @@ def toggle_builtin(connector_id: str, body: ConnectorToggle) -> dict:
 @router.post("/builtin/{connector_id}/search")
 def search_builtin(connector_id: str, q: str = "", limit: int = 8) -> dict:
     settings = get_settings()
-    if not bool(getattr(settings, "connectors_builtin_enabled", True)):
+    if not settings.connectors_builtin_enabled:
         raise HTTPException(status_code=503, detail="builtin connectors disabled")
     if connector_id == "literature":
         rows = connectors_builtin.search_literature(q, limit=limit)
@@ -169,7 +169,7 @@ def mcp_import_confirm(body: McpImportConfirmBody) -> dict:
 @router.put("/mcp")
 def replace_mcp(body: McpServersReplace) -> dict:
     settings = get_settings()
-    if not bool(getattr(settings, "mcp_client_enabled", False)):
+    if not settings.mcp_client_enabled:
         raise HTTPException(status_code=503, detail="mcp_client_enabled is off")
     servers = mcp_client.save_mcp_servers([s.model_dump() for s in body.servers])
     return {"mcp": servers}
@@ -199,7 +199,7 @@ def delete_mcp_server(server_id: str) -> dict:
 @router.post("/mcp/{server_id}/probe")
 def probe_mcp(server_id: str) -> dict:
     settings = get_settings()
-    if not bool(getattr(settings, "mcp_client_enabled", False)):
+    if not settings.mcp_client_enabled:
         raise HTTPException(status_code=503, detail="mcp_client_enabled is off")
     server = next((s for s in mcp_client.list_mcp_servers() if s.get("id") == server_id), None)
     if not server:
@@ -228,7 +228,7 @@ class McpApproveSessionBody(BaseModel):
 def approve_mcp_session(server_id: str, body: McpApproveSessionBody) -> dict:
     """Grant writeish MCP tools for one chat session (not global permanent)."""
     settings = get_settings()
-    if not bool(getattr(settings, "mcp_client_enabled", False)):
+    if not settings.mcp_client_enabled:
         raise HTTPException(status_code=503, detail="mcp_client_enabled is off")
     from ..services.mcp_session_grants import approve_session
 

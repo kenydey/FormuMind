@@ -65,9 +65,9 @@ def _require_report_enabled() -> None:
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_project_dossier_enabled", False):
+    if not settings.wiki_project_dossier_enabled:
         raise PermissionError("wiki_project_dossier_enabled is false")
-    if not getattr(settings, "wiki_dossier_report_enabled", False):
+    if not settings.wiki_dossier_report_enabled:
         raise PermissionError("wiki_dossier_report_enabled is false")
 
 
@@ -337,7 +337,7 @@ def _render_deck_markdown(*, pack: dict[str, Any], prompt: str = "", polish: str
 def _try_llm_polish(*, template: str, pack: dict[str, Any], body: str, prompt: str) -> tuple[str, dict[str, Any]]:
     meta: dict[str, Any] = {"used_llm": False, "model": "", "prompt_hash": "", "error": None}
     settings = get_settings()
-    if not getattr(settings, "wiki_dossier_llm_narrative", False):
+    if not settings.wiki_dossier_llm_narrative:
         meta["error"] = "narrative_flag_off"
         return "", meta
     try:
@@ -362,7 +362,7 @@ def _try_llm_polish(*, template: str, pack: dict[str, Any], body: str, prompt: s
             f"User prompt: {prompt or '(none)'}\n\nDraft excerpt:\n{body[:5000]}\n"
         )
         meta["prompt_hash"] = hashlib.sha1(f"{system}\n{user}".encode()).hexdigest()[:16]
-        meta["model"] = getattr(settings, "llm_model", "") or ""
+        meta["model"] = settings.llm_model or ""
         out, err = complete_structured(system, user, ReportPolish, retry=False)
         if out is None:
             meta["error"] = err or "llm_failed"

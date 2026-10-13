@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from ..config import Settings, get_settings
+from ..config import Settings, api_tokens_json, get_settings, multi_user_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +162,8 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
         if not settings.api_auth_enabled or _is_public_path(request.url.path):
             return await call_next(request)
         # Phase 2 多用户：允许 JSON 映射中的任意 token
-        if os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() in ("1", "true", "yes"):
-            raw = os.getenv("FORMUMIND_API_TOKENS_JSON", "").strip()
+        if multi_user_enabled():
+            raw = api_tokens_json()
             if raw:
                 try:
                     import json
@@ -212,13 +212,13 @@ def get_current_owner(request: Request) -> str:
     目前仅为 experiments/tasks 的 TODO 锚点提供统一入口。
     """
     # 单 token 模式：无身份来源
-    if os.getenv("FORMUMIND_MULTI_USER", "").strip().lower() not in ("1", "true", "yes"):
+    if not multi_user_enabled():
         return "default"
     # 多用户：优先从 JSON 映射解析 token -> owner
     provided = _extract_token(request)
     if provided:
         # 1) JSON 映射表
-        raw = os.getenv("FORMUMIND_API_TOKENS_JSON", "").strip()
+        raw = api_tokens_json()
         if raw:
             try:
                 import json

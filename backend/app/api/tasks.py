@@ -122,7 +122,7 @@ async def _poll_until_terminal(
 ) -> AsyncIterator[TaskProgressEvent]:
     """Poll file/meta/disk snapshots when Redis Pub/Sub is unavailable."""
     if timeout_s is None:
-        timeout_s = float(get_settings().task_stream_timeout_s)
+        timeout_s = get_settings().task_stream_timeout_s
     deadline = time.monotonic() + timeout_s
     last_payload: str | None = None
     while time.monotonic() < deadline:
@@ -199,9 +199,7 @@ async def stream_task_progress(task_id: str, request: Request) -> StreamingRespo
                 pubsub = client.pubsub()
                 await pubsub.subscribe(channel_name(task_id))
                 try:
-                    deadline = time.monotonic() + float(
-                        get_settings().task_stream_timeout_s
-                    )
+                    deadline = time.monotonic() + get_settings().task_stream_timeout_s
                     while time.monotonic() < deadline:
                         message = await pubsub.get_message(
                             ignore_subscribe_messages=True, timeout=1.0

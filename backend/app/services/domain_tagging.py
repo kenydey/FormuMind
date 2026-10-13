@@ -79,7 +79,7 @@ def score_domain_match(
     try:
         from ..config import get_settings
 
-        deny_on = bool(getattr(get_settings(), "kb_search_deny_enabled", True))
+        deny_on = get_settings().kb_search_deny_enabled
     except Exception:
         deny_on = True
     if deny_on:
@@ -148,7 +148,7 @@ def search_deny_penalty(
     try:
         from ..config import get_settings
 
-        if not bool(getattr(get_settings(), "kb_search_deny_enabled", True)):
+        if not get_settings().kb_search_deny_enabled:
             return 0.0
     except Exception:
         return 0.0

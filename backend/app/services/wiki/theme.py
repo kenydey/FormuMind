@@ -40,7 +40,7 @@ def compile_theme(
     settings = get_settings()
     if not settings.wiki_enabled:
         raise PermissionError("wiki_enabled is false")
-    if not getattr(settings, "wiki_llm_themes_enabled", False):
+    if not settings.wiki_llm_themes_enabled:
         raise PermissionError("wiki_llm_themes_enabled is false")
 
     key = safe_key(system_key or topic or "")
@@ -117,7 +117,7 @@ def compile_theme(
     ]
 
     # S2: optional deterministic catalog inject (flag default off).
-    if getattr(settings, "wiki_catalog_inject_themes", False):
+    if settings.wiki_catalog_inject_themes:
         try:
             from .catalog import catalog_snippet_for_compile
 
@@ -207,7 +207,7 @@ def _try_llm_narrative(
         try:
             from ...config import get_settings
 
-            model_name = getattr(get_settings(), "llm_model", "") or ""
+            model_name = get_settings().llm_model or ""
         except Exception:
             pass
         out, err = complete_structured(system, user, ThemeNarrative, retry=False)

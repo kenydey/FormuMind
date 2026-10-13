@@ -76,7 +76,7 @@ def _summary_blob(
 def embed_wiki_page(path: str) -> dict[str, Any]:
     """Upsert one wiki page summary into document_chunks. No-op when flag off."""
     settings = get_settings()
-    if not settings.wiki_enabled or not getattr(settings, "wiki_embed_enabled", False):
+    if not settings.wiki_enabled or not settings.wiki_embed_enabled:
         return {"ok": False, "skipped": True, "reason": "wiki_embed_disabled"}
 
     rel = (path or "").replace("\\", "/").lstrip("/")
@@ -236,7 +236,7 @@ def rebuild_all_wiki_embeds() -> dict[str, Any]:
     settings = get_settings()
     if not settings.wiki_enabled:
         return {"ok": False, "reason": "wiki_disabled", "indexed": 0}
-    if not getattr(settings, "wiki_embed_enabled", False):
+    if not settings.wiki_embed_enabled:
         return {"ok": False, "reason": "wiki_embed_disabled", "indexed": 0}
 
     store = get_wiki_store()
@@ -277,7 +277,7 @@ def search_wiki_embedded(
     ``None`` keeps the old global behavior.
     """
     settings = get_settings()
-    if not settings.wiki_enabled or not getattr(settings, "wiki_embed_enabled", False):
+    if not settings.wiki_enabled or not settings.wiki_embed_enabled:
         return []
     q = (query or "").strip()
     if not q:

@@ -200,12 +200,12 @@ def _l2_near(
     v27 P2-21: 全库归一化矩阵按 chunk_store.generation 缓存 —— 每次 ingest
     不再全量扫描语料向量；audit 模式另加每语言抽样上限。
     """
-    enforce = bool(getattr(settings, "kb_near_dedup_enabled", False))
-    audit = bool(getattr(settings, "kb_near_dedup_audit", True))
+    enforce = settings.kb_near_dedup_enabled
+    audit = settings.kb_near_dedup_audit
     if not (enforce or audit):
         return rows
     try:
-        threshold = float(getattr(settings, "kb_near_dedup_threshold", 0.98))
+        threshold = settings.kb_near_dedup_threshold
     except (TypeError, ValueError):
         threshold = 0.98
 
@@ -383,7 +383,7 @@ def dedupe_chunk_rows(
             from ..db.chunk_store import get_chunk_store
 
             session = get_chunk_store().session_factory()
-        if not skip_l1 and bool(getattr(settings, "kb_dedup_exact_enabled", True)):
+        if not skip_l1 and settings.kb_dedup_exact_enabled:
             rows = _l1_exact(rows, source_id, session, settings)
             if not rows:
                 return rows
@@ -417,7 +417,7 @@ def l1_dedupe_chunk_rows(
             from ..db.chunk_store import get_chunk_store
 
             session = get_chunk_store().session_factory()
-        if bool(getattr(settings, "kb_dedup_exact_enabled", True)):
+        if settings.kb_dedup_exact_enabled:
             rows = _l1_exact(rows, source_id, session, settings)
         return rows
     finally:

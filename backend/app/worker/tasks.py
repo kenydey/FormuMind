@@ -16,8 +16,6 @@ from ..services._fsutil import atomic_write_text, read_text_with_retry
 from ..services.errors import degrade_return, log_handled_exception
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
 import uuid
@@ -26,6 +24,7 @@ from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from ..config import task_dir as _task_persist_dir
 from ..domain.schemas import DOEPlan, OptimizationResult, Requirement, TaskState, TaskStatus
 from ..pipeline import workflow
 from .celery_app import celery_app
@@ -38,11 +37,6 @@ from .task_progress import (
 )
 
 logger = logging.getLogger(__name__)
-
-def _task_persist_dir() -> Path:
-    # 延迟读取：测试用 monkeypatch.setenv 时模块已导入，import 期常量会绕过隔离。
-    return Path(os.environ.get("FORMUMIND_TASK_DIR") or Path(tempfile.gettempdir()) / "formumind_tasks")
-
 
 def _persist_task(task_id: str, status: TaskStatus) -> None:
     try:
@@ -794,7 +788,7 @@ def _kb_ingest_impl(task_id: str, payload: dict) -> dict:
         # takes longer than any default.
         from ..config import get_settings
 
-        limit = int(get_settings().celery_soft_time_limit_s)
+        limit = get_settings().celery_soft_time_limit_s
         msg = (
             f"知识库构建超过单任务时限（{limit // 60} 分钟）已被中止。"
             "已入库的部分保留，可再次运行继续；"
@@ -862,7 +856,6 @@ def _file_ingest_body(task_id: str, payload: dict) -> dict:
     from ..services import colbert_store
     from ..services.ingestion import ingest_files_batch
 
-    from pathlib import Path
     import hashlib
 
     # v3 P1 H-6 full: streaming pipeline — read → hash → dedup → ingest →

@@ -227,13 +227,13 @@ def select_ingest_targets(
     # is to store everything and let the operator opt into a limit.
     limit = max_docs if max_docs is not None else get_settings().kb_ingest_max_docs
     min_rel = get_settings().kb_ingest_min_relevance
-    topic_filter = bool(get_settings().kb_ingest_topic_filter) and not skip_topic_filter
+    topic_filter = get_settings().kb_ingest_topic_filter and not skip_topic_filter
     anchor = _topic_anchor(project_id, query) if topic_filter else None
     settings = get_settings()
     # Per-project quota. `kb_ingest_max_docs` bounds a single batch, which cannot
     # bound a project that accumulates across many runs — and the ingest cost is
     # per-project cumulative (OCR is the memory bottleneck, not the network).
-    src_quota = int(getattr(settings, "kb_project_source_quota", 0) or 0)
+    src_quota = int(settings.kb_project_source_quota or 0)
     if project_id and src_quota > 0:
         try:
             from ..db.source_store import get_source_store
@@ -248,11 +248,11 @@ def select_ingest_targets(
             )
             return []
         limit = room if not limit else min(limit, room)
-    shadow = bool(getattr(settings, "kb_relevance_shadow", True))
+    shadow = settings.kb_relevance_shadow
     shadow_scores: list[float] = []
     shadow_would_reject_ids: set[str] = set()
     topic_reject_ids: set[str] = set()
-    threshold = float(getattr(settings, "kb_ingest_min_relevance", 0.45) or 0.45)
+    threshold = float(settings.kb_ingest_min_relevance or 0.45)
     if threshold <= 0:
         threshold = 0.45
     from .literature import _keywords
@@ -668,7 +668,7 @@ def ingest_evidence_docs(
 
     settings = get_settings()
     emit: StatusCb = status_cb or (lambda meta: None)
-    timeout = float(settings.fulltext_timeout_s)
+    timeout = settings.fulltext_timeout_s
     targets = select_ingest_targets(
         evidence,
         max_docs=max_docs,
@@ -682,7 +682,7 @@ def ingest_evidence_docs(
         emit(doc)
 
     # Per-project PDF quota: v2 决策② —— 不再作为降级门，仅监控告警。
-    pdf_quota = int(getattr(settings, "kb_project_pdf_quota", 0) or 0)
+    pdf_quota = int(settings.kb_project_pdf_quota or 0)
     if project_id and pdf_quota > 0:
         from ..db.source_store import get_source_store
 
@@ -702,7 +702,7 @@ def ingest_evidence_docs(
     # thread because it writes SQLite and because a fetch may run the PDF
     # parser cascade, whose peak (~350 MB, or ~557 MB when a scan goes through
     # OCR) is what bounds the worker count on a small host — not the sockets.
-    workers = max(1, int(getattr(settings, "kb_ingest_workers", 3)))
+    workers = max(1, settings.kb_ingest_workers)
 
     def _fetch(i: int) -> tuple[int, tuple[str | None, bytes | None, list | None]]:
         ev, kind = targets[i]
