@@ -39,7 +39,7 @@ def test_retry_task_persists_on_success(monkeypatch):
 
     monkeypatch.setattr(
         ff, "_dispatch_fetch",
-        lambda kind, ev, timeout, allow_pdf: FetchedFulltext(
+        lambda kind, ev, timeout: FetchedFulltext(
             text="retry fetched text " * 50, pdf_bytes=b"%PDF", tables=[],
         ),
     )

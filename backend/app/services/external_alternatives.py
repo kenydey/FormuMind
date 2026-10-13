@@ -1,7 +1,7 @@
 """External (networked) alternative materials via PubChem similarity.
 
 Used by material substitution to supplement the local catalog pool. Failures
-degrade to an empty list — never raise into the substitutes API path.
+degrade to an empty list — a PubChem failure never raises into the substitutes API path.
 """
 from __future__ import annotations
 

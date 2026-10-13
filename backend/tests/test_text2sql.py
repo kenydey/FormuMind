@@ -133,6 +133,8 @@ def test_build_sqlite_prompt_has_guardrails(engine):
         "INSERT INTO experiments VALUES (1)",
         "UPDATE experiments SET label='x'",
         "SELECT * FROM experiments; DROP TABLE measurements",
+        "SELECT * FROM experiments WHERE label='a;b'; DROP TABLE measurements",
+        "SELECT * FROM experiments WHERE label='unterminated; DROP TABLE measurements",
         "PRAGMA table_info(experiments)",
         "CREATE TABLE evil (id INT)",
         "WITH x AS (SELECT 1) DELETE FROM experiments",
@@ -149,6 +151,8 @@ def test_validate_select_only_rejects(bad):
         "SELECT id FROM experiments",
         "select id, label from experiments where domain='除油剂';",
         "WITH recent AS (SELECT * FROM experiments) SELECT * FROM recent",
+        "SELECT id FROM experiments WHERE label='a;b'",  # a ';' inside a quoted value is data
+        "SELECT id FROM experiments WHERE label LIKE '%;%'",
     ],
 )
 def test_validate_select_only_accepts(good):

@@ -362,16 +362,11 @@ def _openalex_work_id(ev: Evidence, doi: str | None, timeout: float) -> str | No
     return m.group(1) if m else None
 
 
-def _openalex_content_text(
-    ev: Evidence, timeout: float, *, allow_pdf: bool = True
-) -> FetchedFulltext | None:
+def _openalex_content_text(ev: Evidence, timeout: float) -> FetchedFulltext | None:
     """Full text from the OpenAlex content archive. TEI XML first, then PDF.
 
     Returns None (never raises) when the tier is off, unkeyed, or the work has
     no cached content, so the caller continues down the existing chain.
-
-    ``allow_pdf=False`` skips the PDF tier (per-project PDF quota): the TEI tier
-    is free of parse/OCR cost, so it stays available at any quota.
 
     v2 P0-6: returns ``FetchedFulltext`` — the PDF tier keeps raw bytes +
     parsed tables for the ingest sidecar instead of dropping them.
@@ -393,9 +388,7 @@ def _openalex_content_text(
         return None
 
     base = f"https://content.openalex.org/works/{work_id}"
-    tiers = [("grobid-xml", "TEI XML", "tei")]
-    if allow_pdf:
-        tiers.append(("pdf", "PDF", _ACQ_PDF))
+    tiers = [("grobid-xml", "TEI XML", "tei"), ("pdf", "PDF", _ACQ_PDF)]
     # Prefer Authorization header over ?api_key= so a redirect cannot leak the
     # key in the Location/query to a third party (OpenAlex accepts both).
     auth_headers = {**_HEADERS, "Authorization": f"Bearer {api_key}"}
@@ -484,33 +477,23 @@ def _last_acquisition() -> str:
 _ACQ_PDF = "pdf"
 
 
-def _fetch_literature_text(
-    ev: Evidence, timeout: float, *, allow_pdf: bool = True
-) -> FetchedFulltext | None:
+def _fetch_literature_text(ev: Evidence, timeout: float) -> FetchedFulltext | None:
     """Full text for a DOI/arXiv row.
 
     Order (2026-09-11): OpenAlex content archive (TEI XML → PDF, publisher-403
     proof) → OA PDF candidates from OpenAlex/Unpaywall → landing/PMC HTML.
     arXiv keeps its direct path; chemistry preprints arrive via ChemRxiv/OpenAlex.
 
-    ``allow_pdf=False`` (per-project PDF quota reached) drops the two PDF tiers
-    and goes straight to HTML: the quota exists to bound the download+parse+OCR
-    path, which is the memory-bound one, so honouring it by skipping *those
-    tiers* is the point — refusing to store the result afterwards would pay the
-    cost and cap nothing.
-
     v2 P0-6: returns ``FetchedFulltext`` (text + PDF bytes + tables).
     """
 
     # Tier 0: OpenAlex-hosted copy. Cheapest when available — TEI XML skips the
     # parse/OCR stage outright, and it is the only tier immune to publisher 403s.
-    cached = _openalex_content_text(ev, timeout, allow_pdf=allow_pdf)
+    cached = _openalex_content_text(ev, timeout)
     if cached:
         return cached
 
     pdf_cands, landing_cands = _resolve_oa_candidates(ev, timeout)
-    if not allow_pdf:
-        pdf_cands = []
     if not pdf_cands and not landing_cands:
         raise FetchError("无 OA 版本")
     from .pdf_downloader import _parse_pdf_bytes, _raw_pdf_stream_text, fetch_pdf_ex
@@ -682,9 +665,7 @@ def _fetch_web_text(ev: Evidence, timeout: float) -> str | None:
     return text if text and len(text.strip()) > 200 else None
 
 
-def _dispatch_fetch(
-    kind: str, ev: Evidence, timeout: float, *, allow_pdf: bool = True
-) -> FetchedFulltext | None:
+def _dispatch_fetch(kind: str, ev: Evidence, timeout: float) -> FetchedFulltext | None:
     """Resolve the fetcher at call time (keeps the registry monkeypatchable).
 
     v2 P0-6: returns ``FetchedFulltext`` (text + PDF bytes + tables).
@@ -705,7 +686,7 @@ def _dispatch_fetch(
             _set_acquisition("html" if prefer_html else _ACQ_PDF)
         return hit
     if kind == "literature":
-        return _fetch_literature_text(ev, timeout, allow_pdf=allow_pdf)
+        return _fetch_literature_text(ev, timeout)
     if kind == "web":
         text = _fetch_web_text(ev, timeout)
         if text:

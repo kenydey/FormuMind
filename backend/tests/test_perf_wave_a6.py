@@ -211,7 +211,7 @@ def test_oa_enrich_parallel_fetch_serial_persist(tmp_path, monkeypatch):
     persist_threads: list[int] = []
     main_ident = threading.get_ident()
 
-    def fake_fetch(kind, ev, timeout, *, allow_pdf=True):
+    def fake_fetch(kind, ev, timeout):
         fetch_threads.append(threading.get_ident())
         time.sleep(0.4)
         # v2 P0-6: the dispatcher returns the whole FetchedFulltext (text + PDF bytes + tables), not a bare string

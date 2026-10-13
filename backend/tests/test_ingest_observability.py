@@ -227,7 +227,7 @@ def test_indexed_row_skipped_with_reason(stores, monkeypatch):
 def test_fetch_failure_persisted_to_db(stores, monkeypatch):
     src, _ = stores
 
-    def _boom(kind, ev, timeout, allow_pdf=True):
+    def _boom(kind, ev, timeout):
         raise ff.FetchError("no_oa_version")
 
     monkeypatch.setattr(ff, "_dispatch_fetch", _boom)
@@ -256,7 +256,7 @@ def test_failure_persistence_is_fail_open(stores, monkeypatch):
         source_store_mod.SourceStore, "record_ingest_failure", _broken
     )
 
-    def _boom(kind, ev, timeout, allow_pdf=True):
+    def _boom(kind, ev, timeout):
         raise ff.FetchError("no_oa_version")
 
     monkeypatch.setattr(ff, "_dispatch_fetch", _boom)

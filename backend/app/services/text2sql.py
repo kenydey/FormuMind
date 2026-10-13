@@ -473,11 +473,11 @@ def validate_select_only(sql: str) -> str:
     first = cleaned.split(None, 1)[0].upper() if cleaned.split() else ""
     if first not in ("SELECT", "WITH"):
         raise Text2SQLError(f"only SELECT/WITH allowed, got: {first or '<empty>'}")
-    # Multi-statement smuggling.
-    if ";" in cleaned:
-        raise Text2SQLError("multiple statements not allowed")
-    # Strip string literals before the keyword scan.
+    # Strip string literals first: a ';' or a keyword inside a quoted value is data, not SQL.
     code_only = _STRING_LITERAL.sub("''", cleaned)
+    # Multi-statement smuggling.
+    if ";" in code_only:
+        raise Text2SQLError("multiple statements not allowed")
     hit = _FORBIDDEN.search(code_only)
     if hit:
         raise Text2SQLError(f"forbidden keyword: {hit.group(1).upper()}")

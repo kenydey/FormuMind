@@ -14,7 +14,7 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 # 模型维度映射（API 层同样引用这一份）
-_MODEL_DIMS = {
+MODEL_DIMS = {
     "sentence-transformers/all-MiniLM-L6-v2": 384,
     "BAAI/bge-small-zh-v1.5": 512,
     "BAAI/bge-m3": 1024,
@@ -40,7 +40,7 @@ def reindex_for_model(
     if not db_path.exists():
         raise FileNotFoundError(f"DB 不存在: {db_path}")
 
-    target_dim = _MODEL_DIMS.get(model_id)
+    target_dim = MODEL_DIMS.get(model_id)
     if not target_dim:
         raise ValueError(f"未知模型维度: {model_id}")
 
@@ -60,73 +60,70 @@ def reindex_for_model(
     except Exception:
         pass
 
-    # 2. 加载模型（离线优先，失败则在线）
-    import os
-
-    # 先尝试离线（已缓存），失败则允许下载
+    # 2. 加载模型：先只用本地缓存，缺失再联网（不改进程级 HF_HUB_OFFLINE）
     print(f"加载模型 {model_id} ...")
     from sentence_transformers import SentenceTransformer
 
     try:
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        model = SentenceTransformer(model_id)
+        model = SentenceTransformer(model_id, local_files_only=True)
     except Exception:
-        # 离线失败，尝试在线下载
-        os.environ.pop("HF_HUB_OFFLINE", None)
         model = SentenceTransformer(model_id)
     dim = model.get_sentence_embedding_dimension()
     if dim != target_dim:
-        logger.warning("模型维度 %d 与预期 %d 不符", dim, target_dim)
+        # 在动任何数据之前拒绝：否则整库会写入维度不符的向量，直到最后的抽查才发现。
+        raise RuntimeError(f"模型维度 {dim} 与预期 {target_dim} 不符: {model_id}")
 
     # 3. 逐批重嵌
-    from .kb_ann import blob_to_vector, vector_to_blob
+    from .kb_ann import vector_to_blob
 
     con = sqlite3.connect(str(db_path))
-    cur = con.cursor()
-    cur.execute("SELECT COUNT(*) FROM document_chunks")
-    total = cur.fetchone()[0]
-    # C P2-4: 分页读取 —— 全表 fetchall 在 10 万 chunk 级内存爆炸。
-    # ORDER BY id 保证分页稳定。
-    cur.execute("SELECT id, text FROM document_chunks ORDER BY id")
-
-    done = 0
-    t0 = time.time()
-    while True:
-        batch_rows = cur.fetchmany(batch)
-        if not batch_rows:
-            break
-        texts = [(r[1] or "")[:8000] for r in batch_rows]
-        vecs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        for (cid, _), vec in zip(batch_rows, vecs):
-            blob = vector_to_blob(vec.astype("float32"))
-            cur.execute(
+    try:
+        total = con.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        done = 0
+        last_id = ""
+        t0 = time.time()
+        # C P2-4: 分页读取 —— 全表 fetchall 在 10 万 chunk 级内存爆炸。
+        # 按 id 做 keyset 分页：不持有未读完的 SELECT 游标，逐批 UPDATE/COMMIT 不会打断读取。
+        while True:
+            batch_rows = con.execute(
+                "SELECT id, text FROM document_chunks WHERE id > ? ORDER BY id LIMIT ?",
+                (last_id, batch),
+            ).fetchall()
+            if not batch_rows:
+                break
+            texts = [(r[1] or "")[:8000] for r in batch_rows]
+            vecs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+            con.executemany(
                 """UPDATE document_chunks
                    SET embedding_blob=?, embedding_model=?, embedding=NULL
                    WHERE id=?""",
-                (blob, model_id, cid),
+                [
+                    (vector_to_blob(vec.astype("float32")), model_id, cid)
+                    for (cid, _), vec in zip(batch_rows, vecs)
+                ],
             )
-        con.commit()
-        done += len(batch_rows)
-        if progress_cb:
-            progress_cb(done / total if total else 1.0)
-        if done % 320 == 0:
-            logger.info("重建进度 %d/%d", done, total)
+            con.commit()
+            last_id = batch_rows[-1][0]
+            done += len(batch_rows)
+            if progress_cb:
+                progress_cb(done / total if total else 1.0)
+            if done % 320 == 0:
+                logger.info("重建进度 %d/%d", done, total)
 
-    # 4. 校验
-    cur.execute(
-        "SELECT COUNT(*) FROM document_chunks WHERE embedding_model=?", (model_id,)
-    )
-    migrated = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding_blob IS NULL")
-    null_blob = cur.fetchone()[0]
-    # 抽查维度
-    cur.execute("SELECT embedding_blob FROM document_chunks LIMIT 1")
-    row = cur.fetchone()
-    if row and row[0]:
-        v = blob_to_vector(row[0])
-        if len(v) != target_dim:
-            raise RuntimeError(f"维度校验失败: {len(v)} != {target_dim}")
-    con.close()
+        # 4. 校验
+        migrated = con.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE embedding_model=?", (model_id,)
+        ).fetchone()[0]
+        null_blob = con.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE embedding_blob IS NULL"
+        ).fetchone()[0]
+        row = con.execute("SELECT embedding_blob FROM document_chunks LIMIT 1").fetchone()
+        if row and row[0]:
+            n_dims = len(row[0]) // 4  # float32 little-endian, see vector_to_blob
+            if n_dims != target_dim:
+                raise RuntimeError(f"维度校验失败: {n_dims} != {target_dim}")
+    finally:
+        con.close()
 
     if null_blob != 0:
         raise RuntimeError(f"仍有 {null_blob} 个 NULL blob")

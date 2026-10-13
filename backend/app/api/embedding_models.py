@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..services import embedding_download
-from ..services.embedding_reindex import _MODEL_DIMS
+from ..services.embedding_reindex import MODEL_DIMS
 from ..services.rag import EMBEDDING_MODEL_CATALOG, embed_model_name
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def list_models():
                 label=row["label"],
                 langs=row["langs"],
                 note=row["note"],
-                dim=_MODEL_DIMS.get(mid, 0),
+                dim=MODEL_DIMS.get(mid, 0),
                 size_estimate=embedding_download.get_model_size_estimate(mid),
                 cached=embedding_download.is_model_cached(mid),
                 current=(mid == current),

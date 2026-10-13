@@ -458,8 +458,7 @@ def _origin_lookup_keys(ev: Evidence) -> list[str]:
 
 
 def _fetch_one(
-    ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any], *,
-    allow_pdf: bool = True,
+    ev: Evidence, kind: str, timeout: float, emit: StatusCb, doc: dict[str, Any],
 ) -> tuple[str | None, bytes | None, list | None]:
     """Acquire one document's full text. Network-bound; safe to run in parallel.
 
@@ -514,7 +513,7 @@ def _fetch_one(
     fetch_reason: str | None = None
     try:
         with timing.span("fetch"):
-            _hit = ff._dispatch_fetch(kind, ev, timeout, allow_pdf=allow_pdf)
+            _hit = ff._dispatch_fetch(kind, ev, timeout)
             text = _hit.text if _hit else None
             pdf_bytes = _hit.pdf_bytes if _hit else None
             tables = _hit.tables if _hit else None

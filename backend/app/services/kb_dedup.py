@@ -204,10 +204,7 @@ def _l2_near(
     audit = settings.kb_near_dedup_audit
     if not (enforce or audit):
         return rows
-    try:
-        threshold = settings.kb_near_dedup_threshold
-    except (TypeError, ValueError):
-        threshold = 0.98
+    threshold = settings.kb_near_dedup_threshold
 
     # Rows carrying an embedding vector, grouped by language.
     indexed: list[tuple[int, str, Any]] = []

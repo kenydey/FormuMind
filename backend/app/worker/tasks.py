@@ -2022,7 +2022,7 @@ def retry_fulltext_fetch(self, payload: dict) -> dict:
             relevance=0.9,
             url=payload.get("url"),
         )
-        hit = ff._dispatch_fetch(kind, ev, timeout=30.0, allow_pdf=True)
+        hit = ff._dispatch_fetch(kind, ev, timeout=30.0)
         if not hit or not (hit.text or "").strip():
             raise RuntimeError("retry fetch returned empty")
         source_id = ff._persist_fulltext(

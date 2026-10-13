@@ -174,7 +174,7 @@ def _retry_params(settings: Any = None) -> tuple[int, float]:
                 max(0, int(retries) if retries is not None else 2),
                 max(0.0, float(backoff_s) if backoff_s is not None else 0.5),
             )
-        except (TypeError, ValueError):  # noqa: BLE001
+        except (AttributeError, TypeError, ValueError):  # noqa: BLE001 — a partial/duck-typed settings object
             continue
     return 2, 0.5
 

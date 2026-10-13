@@ -326,7 +326,7 @@ def test_fetches_run_concurrently_but_indexing_stays_serial(monkeypatch):
     index_lock = threading.Lock()
     inside = {"n": 0}
 
-    def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
+    def fake_fetch(ev, kind, timeout, emit, doc):
         import time
 
         # v17 CI fix: Windows 上无 sleep 时 12 个快任务可能全跑在同一线程，
@@ -374,7 +374,7 @@ def test_one_failing_fetch_does_not_stop_the_queue(monkeypatch):
     monkeypatch.setattr(get_settings(), "kb_ingest_min_relevance", 0.0, raising=False)
     monkeypatch.setattr(get_settings(), "kb_ingest_workers", 3, raising=False)
 
-    def flaky(ev, kind, timeout, emit, doc, allow_pdf=True):
+    def flaky(ev, kind, timeout, emit, doc):
         if ev.identifier.endswith("00002A"):
             raise RuntimeError("network exploded")
         return ("全文", None, None)
@@ -400,7 +400,7 @@ def test_the_whole_queue_is_announced_before_any_fetch(monkeypatch):
     announced: list[str] = []
     fetched: list[str] = []
 
-    def fake_fetch(ev, kind, timeout, emit, doc, allow_pdf=True):
+    def fake_fetch(ev, kind, timeout, emit, doc):
         fetched.append(ev.identifier)
         return (None, None, None)
 
