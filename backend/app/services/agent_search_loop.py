@@ -79,7 +79,7 @@ def agent_search_enabled(settings: Any | None = None) -> bool:
         from ..config import get_settings
 
         settings = get_settings()
-    return settings.agent_search_enabled
+    return bool(getattr(settings, "agent_search_enabled", False))
 
 
 def _agent_cfg(settings: Any | None, name: str, default: Any) -> Any:

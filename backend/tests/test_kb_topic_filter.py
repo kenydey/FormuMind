@@ -12,6 +12,7 @@ import pytest
 from app.config import get_settings
 from app.domain.schemas import Evidence
 from app.services import kb_ingest
+from tests.settings_defaults import SettingsDefaults
 
 
 def _ev(title: str, *, snippet: str = "", ident: str | None = None) -> Evidence:
@@ -162,7 +163,7 @@ def test_select_respects_filter_switch(monkeypatch):
     monkeypatch.setattr(kb_ingest, "_topic_anchor", lambda pid, q=None: ({"钝化"}, {"镁"}))
     monkeypatch.setattr(
         "app.services.kb_ingest.get_settings",
-        lambda: type("S", (), {"kb_ingest_topic_filter": False, "kb_ingest_max_docs": 0, "kb_ingest_min_relevance": 0.0})(),
+        lambda: type("S", (SettingsDefaults,), {"kb_ingest_topic_filter": False, "kb_ingest_max_docs": 0, "kb_ingest_min_relevance": 0.0})(),
     )
     evs = [_ev("Heusler magnetism notes")]
     assert len(kb_ingest.select_ingest_targets(evs, project_id="p1")) == 1

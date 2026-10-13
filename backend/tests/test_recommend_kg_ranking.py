@@ -8,6 +8,7 @@ from app.domain.schemas import Formulation, Ingredient, ProductDomain, Recommend
 from app.services.recommend_pipeline import finalize_scored_formulations
 from app.services.kg_chemical_check import ChemicalCheckResult
 from app.services.kg_recommend_score import record_kg_compat
+from tests.settings_defaults import SettingsDefaults
 
 
 def _form(name: str, score: float, ingredients: list[str] | None = None) -> Formulation:
@@ -25,7 +26,7 @@ def _form(name: str, score: float, ingredients: list[str] | None = None) -> Form
 def test_kg_incompatible_sinks_in_ranking(monkeypatch):
     """A KG-incompatible formulation ranks below an equal-score compatible one."""
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         recommend_diversity_enabled = False
         recommend_default_n = 10
@@ -61,7 +62,7 @@ def test_kg_incompatible_sinks_in_ranking(monkeypatch):
 def test_kg_compat_field_survives_pipeline(monkeypatch):
     """kg_compat detail is preserved on the formulation through finalize."""
 
-    class _S:
+    class _S(SettingsDefaults):
         recommend_diversity_enabled = False
         recommend_default_n = 10
         recommend_max_n = 10
@@ -90,7 +91,7 @@ def test_score_and_validate_chem_screen_applies_kg(monkeypatch):
     from app.pipeline.workflow import _score_and_validate, process_for
     from app.domain.schemas import Requirement, ObjectiveSpec
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         kg_inhibits_penalty = 0.5
         kg_synergizes_bonus = 1.0
@@ -159,7 +160,7 @@ def test_score_and_validate_keeps_metric_measured_bonus(monkeypatch):
     from app.pipeline.workflow import _score_and_validate, process_for
     from app.domain.schemas import Requirement, ObjectiveSpec
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         kg_inhibits_penalty = 0.5
         kg_synergizes_bonus = 1.0
@@ -219,7 +220,7 @@ def test_finalize_backfills_score_and_predicted(monkeypatch):
     """
     from app.services.recommend_pipeline import finalize_scored_formulations
 
-    class _S:
+    class _S(SettingsDefaults):
         recommend_diversity_enabled = False
         recommend_default_n = 10
         recommend_max_n = 10

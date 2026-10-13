@@ -7,6 +7,7 @@ import pytest
 
 from app.services import literature_manifest as lm
 from app.services import publication_preflight as pf
+from tests.settings_defaults import SettingsDefaults
 
 
 @pytest.fixture()
@@ -16,7 +17,7 @@ def tmp_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return tmp_path
 
 
-class _S:
+class _S(SettingsDefaults):
     literature_manifest_enabled = True
     frozen_corpus_required_for_export = False
     literature_screening_required_for_export = False
@@ -107,7 +108,7 @@ def test_preflight_corpus_cite(tmp_data):
 
 
 def test_export_allowed_blocks_without_freeze(tmp_data):
-    class Req:
+    class Req(SettingsDefaults):
         publication_preflight_enabled = True
         literature_manifest_enabled = True
         frozen_corpus_required_for_export = True

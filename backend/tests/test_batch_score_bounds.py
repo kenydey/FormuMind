@@ -16,6 +16,7 @@ import pytest
 from app.domain.schemas import Formulation, Ingredient, ObjectiveSpec, ProductDomain, Requirement
 from app.services import predictor
 from app.services import recommend_pipeline as rp
+from tests.settings_defaults import SettingsDefaults
 
 
 def _obj(metric: str, direction: str = "maximize", **kw) -> ObjectiveSpec:
@@ -183,7 +184,7 @@ def test_finalize_bundle_scores_by_resolved_objectives_and_ranks_by_quality(monk
         {"product_name": "t", "domain": "anticorrosion_coating", "objectives": []}
     )
 
-    class _S:
+    class _S(SettingsDefaults):
         recommend_diversity_enabled = False
         recommend_default_n = 5
         recommend_max_n = 5

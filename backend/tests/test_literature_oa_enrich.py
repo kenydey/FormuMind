@@ -10,9 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import literature_oa_enrich as oe
+from tests.settings_defaults import SettingsDefaults
 
 
-class _Settings(SimpleNamespace):
+class _Settings(SettingsDefaults, SimpleNamespace):
     literature_manifest_enabled = True
     literature_oa_enrich_enabled = True
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.services import publication_preflight as pf
+from tests.settings_defaults import SettingsDefaults
 
 
 @pytest.fixture()
@@ -73,7 +74,7 @@ def test_review_override_finalize(tmp_data):
 
 
 def test_export_allowed_blocks_then_allows(tmp_data):
-    class S:
+    class S(SettingsDefaults):
         publication_preflight_enabled = True
 
     md = "TODO fix this claim about 10 wt%.\n"
@@ -94,7 +95,7 @@ def test_export_allowed_blocks_then_allows(tmp_data):
 
 
 def test_export_skipped_when_flag_off(tmp_data):
-    class S:
+    class S(SettingsDefaults):
         publication_preflight_enabled = False
 
     ok, detail = pf.export_allowed(
@@ -199,7 +200,7 @@ def test_fixed_finding_dropped_not_stale(tmp_data):
 
 def test_stale_blocking_blocks_export(tmp_data):
     """stale + open + blocking 阻断导出，错误信息区分 stale。"""
-    class S:
+    class S(SettingsDefaults):
         publication_preflight_enabled = True
 
     md1 = "TODO fix this.\n"
@@ -268,7 +269,7 @@ def test_load_state_compat_old_json(tmp_data):
 
 def test_audit_hook_maps_fail_to_major(tmp_data):
     """W1-9 钩子：flag 开启时 audit fail → major finding（check="audit"）。"""
-    class S:
+    class S(SettingsDefaults):
         preflight_artifact_audit_enabled = True
 
     findings = pf.run_checks(
@@ -278,7 +279,7 @@ def test_audit_hook_maps_fail_to_major(tmp_data):
     assert audit_f
     assert all(f.severity == "major" and f.status == "open" for f in audit_f)
 
-    class S2:
+    class S2(SettingsDefaults):
         preflight_artifact_audit_enabled = False
 
     findings2 = pf.run_checks(

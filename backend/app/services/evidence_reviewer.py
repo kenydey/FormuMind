@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def reviewer_enabled(settings: Any) -> bool:
-    return settings.evidence_reviewer_enabled
+    return bool(getattr(settings, "evidence_reviewer_enabled", False))
 
 
 def llm_rubric_enabled(settings: Any) -> bool:
     """LLM rubric 判定开关（默认关闭）。"""
-    return settings.evidence_reviewer_llm_enabled
+    return bool(getattr(settings, "evidence_reviewer_llm_enabled", False))
 
 
 class ReviewerModelError(Exception):
@@ -31,7 +31,7 @@ def reviewer_model_name(settings: Any) -> str | None:
     未配置（空字符串）→ None（沿用全局 llm_model，保持向后兼容）。
     """
     try:
-        name = settings.evidence_reviewer_model
+        name = getattr(settings, "evidence_reviewer_model", None)
     except Exception:  # noqa: BLE001
         name = None
     if isinstance(name, str) and name.strip():

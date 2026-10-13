@@ -50,7 +50,7 @@ def run_startup_checks(settings) -> list[str]:
     errors: list[str] = []
 
     # 1. db_url must use a supported scheme.
-    db_url = (settings.db_url or "").strip()
+    db_url = (getattr(settings, "db_url", "") or "").strip()
     scheme = urlparse(db_url).scheme.lower()
     if scheme not in _SUPPORTED_DB_SCHEMES:
         errors.append(
@@ -77,8 +77,8 @@ def run_startup_checks(settings) -> list[str]:
             )
 
     # 3. ELN-mandatory deploys must point at a real Datalab URL.
-    if settings.datalab_required:
-        url = (settings.datalab_api_url or "").strip()
+    if getattr(settings, "datalab_required", False):
+        url = (getattr(settings, "datalab_api_url", "") or "").strip()
         if not url:
             errors.append(
                 "FORMUMIND_DATALAB_REQUIRED=true but FORMUMIND_DATALAB_API_URL "
@@ -88,8 +88,8 @@ def run_startup_checks(settings) -> list[str]:
 
     # 4. Auth explicitly disabled in production is almost certainly a mistake
     #    (config auto-enables it for production envs).
-    env = (settings.environment or "").strip().lower()
-    if env in ("production", "prod") and settings.api_auth_enabled is False:
+    env = (getattr(settings, "environment", "") or "").strip().lower()
+    if env in ("production", "prod") and getattr(settings, "api_auth_enabled", None) is False:
         warnings.append(
             "FORMUMIND_API_AUTH_ENABLED=false with FORMUMIND_ENVIRONMENT=production: "
             "the API is unauthenticated. Set a FORMUMIND_API_TOKEN and enable auth "
@@ -97,7 +97,7 @@ def run_startup_checks(settings) -> list[str]:
         )
 
     # 5. The Neo4j password compose falls back to is published in the repository.
-    if env in ("production", "prod") and settings.neo4j_enabled:
+    if env in ("production", "prod") and getattr(settings, "neo4j_enabled", False):
         from .services import neo4j_kg
 
         if neo4j_kg.uses_default_password():

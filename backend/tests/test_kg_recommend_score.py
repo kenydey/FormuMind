@@ -7,6 +7,7 @@ import pytest
 from app.domain.schemas import Formulation, Ingredient, ProductDomain
 from app.services.kg_chemical_check import ChemicalCheckResult
 from app.services.kg_recommend_score import kg_compat_adjust, record_kg_compat
+from tests.settings_defaults import SettingsDefaults
 
 
 def _form(*names: str, score: float | None = 0.8) -> Formulation:
@@ -22,7 +23,7 @@ def _form(*names: str, score: float | None = 0.8) -> Formulation:
 def test_kg_disabled_noop(monkeypatch):
     """KG off → score untouched, no kg_compat recorded."""
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = False
 
     monkeypatch.setattr("app.services.kg_recommend_score.get_settings", lambda: _S())
@@ -36,7 +37,7 @@ def test_kg_disabled_noop(monkeypatch):
 def test_inhibits_penalizes_score(monkeypatch):
     """INHIBITS relation → score multiplied by penalty + warning + kg_compat."""
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         kg_inhibits_penalty = 0.5
         kg_synergizes_bonus = 1.0
@@ -81,7 +82,7 @@ def test_inhibits_penalizes_score(monkeypatch):
 def test_synergizes_bonus_default_off(monkeypatch):
     """SYNERGIZES with default bonus=1.0 → no score change."""
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         kg_inhibits_penalty = 0.5
         kg_synergizes_bonus = 1.0
@@ -121,7 +122,7 @@ def test_synergizes_bonus_default_off(monkeypatch):
 def test_synergizes_bonus_applied(monkeypatch):
     """SYNERGIZES with bonus=1.1 → score bumped."""
 
-    class _S:
+    class _S(SettingsDefaults):
         kg_enabled = True
         kg_inhibits_penalty = 0.5
         kg_synergizes_bonus = 1.1
