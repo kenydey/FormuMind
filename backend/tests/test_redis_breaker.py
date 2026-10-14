@@ -126,3 +126,35 @@ def test_a_task_progress_event_falls_back_to_disk_without_a_second_connection_at
         )
     publishes = [c for c in fake_redis["calls"] if c[0] == "publish"]
     assert len(publishes) == 1, "after the first failure the other five events did not touch Redis"
+
+
+# ── a slow reply is not an outage; pipelines / locks are guarded ─────────────────────────────────────────────────────
+
+def test_a_timeout_while_reading_a_reply_does_not_open_the_breaker():
+    import redis
+
+    assert redis_breaker.is_unreachable(redis.exceptions.TimeoutError("Timeout connecting to server")) is True
+    assert redis_breaker.is_unreachable(redis.exceptions.TimeoutError("Timeout reading from socket")) is False
+    assert redis_breaker.is_unreachable(redis.exceptions.ConnectionError("refused")) is True
+    assert redis_breaker.is_unreachable(redis.exceptions.ResponseError("WRONGTYPE")) is False
+    assert redis_breaker.note_failure(redis.exceptions.TimeoutError("Timeout reading from socket")) is False
+    assert not redis_breaker.is_open()
+
+
+def test_objects_returned_by_pipeline_and_lock_trip_the_breaker_too():
+    import redis
+
+    class _Pipe:
+        def execute(self):
+            raise redis.exceptions.ConnectionError("gone")
+
+    class _Client:
+        def pipeline(self):
+            return _Pipe()
+
+    redis_breaker.reset()
+    guarded = redis_breaker.GuardedRedis(_Client())
+    with pytest.raises(redis.exceptions.ConnectionError):
+        guarded.pipeline().execute()
+    assert redis_breaker.is_open()
+    redis_breaker.reset()

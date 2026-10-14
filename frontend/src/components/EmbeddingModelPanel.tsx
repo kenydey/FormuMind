@@ -1,15 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type EmbeddingModel } from "../api";
 
-interface EmbeddingModel {
-  id: string;
-  label: string;
-  langs: string;
-  note: string;
-  dim: number;
-  size_estimate: string;
-  cached: boolean;
-  current: boolean;
-}
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function EmbeddingModelPanel() {
   const [models, setModels] = useState<EmbeddingModel[]>([]);
@@ -19,47 +11,69 @@ export default function EmbeddingModelPanel() {
   const [switching, setSwitching] = useState(false);
   const [swProgress, setSwProgress] = useState(0);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Poll timers must not outlive the panel (closing Settings mid-download used to leave them running).
+  const timers = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/embedding-models");
-      if (r.ok) setModels(await r.json());
-    } catch {
-      /* ignore */
+      setModels(await api.embeddingModels());
+    } catch (e) {
+      setMsg({ ok: false, text: `模型列表加载失败: ${errText(e)}` });
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+    const active = timers.current;
+    return () => {
+      active.forEach(clearInterval);
+      active.clear();
+    };
+  }, [load]);
 
-  const pollDownload = (taskId: string, modelId: string) => {
+  /** Poll `tick` every `ms` until it returns true (finished) or throws (the error is shown, polling stops). */
+  const poll = (ms: number, tick: () => Promise<boolean>, onError: (e: unknown) => void) => {
     const iv = setInterval(async () => {
       try {
-        const r = await fetch(`/api/embedding-models/tasks/${taskId}`);
-        if (!r.ok) {
+        if (await tick()) {
           clearInterval(iv);
-          return;
+          timers.current.delete(iv);
         }
-        const t = await r.json();
+      } catch (e) {
+        clearInterval(iv);
+        timers.current.delete(iv);
+        onError(e);
+      }
+    }, ms);
+    timers.current.add(iv);
+  };
+
+  const pollDownload = (taskId: string, modelId: string) =>
+    poll(
+      1000,
+      async () => {
+        const t = await api.embeddingDownloadTask(taskId);
         setDlProgress(t.progress);
         if (t.status === "done") {
-          clearInterval(iv);
           setDownloading(null);
           setMsg({ ok: true, text: `下载完成: ${modelId}` });
           void load();
-        } else if (t.status === "failed") {
-          clearInterval(iv);
+          return true;
+        }
+        if (t.status === "failed") {
           setDownloading(null);
           setMsg({ ok: false, text: `下载失败: ${t.error || "未知错误"}` });
+          return true;
         }
-      } catch {
-        clearInterval(iv);
-      }
-    }, 1000);
-  };
+        return false;
+      },
+      (e) => {
+        setDownloading(null);
+        setMsg({ ok: false, text: `下载进度查询失败: ${errText(e)}` });
+      },
+    );
 
   const onDownload = async (m: EmbeddingModel) => {
     // 大模型二次确认（bge-m3 ~2GB）
@@ -71,45 +85,38 @@ export default function EmbeddingModelPanel() {
     setDlProgress(0);
     setMsg(null);
     try {
-      const r = await fetch("/api/embedding-models/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: m.id }),
-      });
-      if (!r.ok) throw new Error(await r.text());
-      const { task_id } = await r.json();
+      const { task_id } = await api.downloadEmbeddingModel(m.id);
       pollDownload(task_id, m.id);
     } catch (e) {
       setDownloading(null);
-      setMsg({ ok: false, text: `下载启动失败: ${e}` });
+      setMsg({ ok: false, text: `下载启动失败: ${errText(e)}` });
     }
   };
 
-  const pollSwitch = () => {
-    const iv = setInterval(async () => {
-      try {
-        const r = await fetch("/api/embedding-models/switch/status");
-        if (!r.ok) {
-          clearInterval(iv);
-          return;
-        }
-        const s = await r.json();
+  const pollSwitch = () =>
+    poll(
+      2000,
+      async () => {
+        const s = await api.embeddingSwitchStatus();
         setSwProgress(s.progress);
         if (s.status === "done") {
-          clearInterval(iv);
           setSwitching(false);
           setMsg({ ok: true, text: "模型切换完成，索引已重建" });
           void load();
-        } else if (s.status === "failed") {
-          clearInterval(iv);
+          return true;
+        }
+        if (s.status === "failed") {
           setSwitching(false);
           setMsg({ ok: false, text: `切换失败: ${s.error || "未知错误"}` });
+          return true;
         }
-      } catch {
-        clearInterval(iv);
-      }
-    }, 2000);
-  };
+        return false;
+      },
+      (e) => {
+        setSwitching(false);
+        setMsg({ ok: false, text: `切换进度查询失败: ${errText(e)}` });
+      },
+    );
 
   const onSwitch = async (m: EmbeddingModel) => {
     if (
@@ -123,16 +130,11 @@ export default function EmbeddingModelPanel() {
     setSwProgress(0);
     setMsg(null);
     try {
-      const r = await fetch("/api/embedding-models/switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: m.id }),
-      });
-      if (!r.ok) throw new Error(await r.text());
+      await api.switchEmbeddingModel(m.id);
       pollSwitch();
     } catch (e) {
       setSwitching(false);
-      setMsg({ ok: false, text: `切换启动失败: ${e}` });
+      setMsg({ ok: false, text: `切换启动失败: ${errText(e)}` });
     }
   };
 

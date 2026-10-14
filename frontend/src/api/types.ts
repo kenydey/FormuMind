@@ -1756,6 +1756,34 @@ export interface KGSubstituteDiscoverResponse {
   substitutes: KGSubstituteCandidate[];
 }
 
+/** One selectable embedding model (GET /api/embedding-models). */
+export interface EmbeddingModel {
+  id: string;
+  label: string;
+  langs: string;
+  note: string;
+  dim: number;
+  size_estimate: string;
+  cached: boolean;
+  current: boolean;
+}
+
+/** A model download task (GET /api/embedding-models/tasks/{id}). */
+export interface EmbeddingDownloadTask {
+  task_id: string;
+  model_id: string;
+  status: "pending" | "downloading" | "done" | "failed";
+  progress: number;
+  error?: string | null;
+}
+
+/** The re-index job started by switching models (GET /api/embedding-models/switch/status). */
+export interface EmbeddingSwitchStatus {
+  status: "idle" | "running" | "done" | "failed";
+  progress: number;
+  error?: string | null;
+}
+
 /** Persistent knowledge base counters (GET /api/kb/stats). */
 export interface KBStats {
   enabled: boolean;

@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import sqlite3
 import time
 from pathlib import Path
@@ -23,6 +22,19 @@ MODEL_DIMS = {
 }
 
 
+def _configured_db_path() -> Path:
+    """The SQLite file the app is actually using (``FORMUMIND_DB_URL`` / ``Settings.db_url``)."""
+    import os
+
+    from ..config import get_settings
+
+    url = os.environ.get("FORMUMIND_DB_URL") or get_settings().db_url
+    prefix = "sqlite:///"
+    if not url.startswith(prefix):
+        raise RuntimeError(f"嵌入模型重建只支持 SQLite 数据库，当前: {url.split(':', 1)[0]}")
+    return Path(url[len(prefix):]).resolve()
+
+
 def reindex_for_model(
     model_id: str,
     db_path: str | Path | None = None,
@@ -34,9 +46,7 @@ def reindex_for_model(
     流程：备份 → 加载模型 → 逐批重嵌 → 更新 embedding_model → 校验。
     返回统计 dict。
     """
-    if db_path is None:
-        db_path = Path(__file__).resolve().parent.parent.parent / "data" / "formumind.db"
-    db_path = Path(db_path)
+    db_path = Path(db_path) if db_path is not None else _configured_db_path()
     if not db_path.exists():
         raise FileNotFoundError(f"DB 不存在: {db_path}")
 
@@ -46,7 +56,14 @@ def reindex_for_model(
 
     # 1. 备份
     bak = db_path.with_suffix(f".db.bak.{int(time.time())}")
-    shutil.copy2(db_path, bak)
+    # sqlite3's online-backup API: a plain file copy of a live WAL-mode database can miss pages still in the -wal file.
+    src = sqlite3.connect(str(db_path), timeout=60)
+    dst = sqlite3.connect(str(bak))
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
     logger.info("已备份 DB: %s", bak)
     # C P2-3: 备份 retention —— 只保留最近 3 个，避免磁盘堆积。
     try:
@@ -76,7 +93,7 @@ def reindex_for_model(
     # 3. 逐批重嵌
     from .kb_ann import vector_to_blob
 
-    con = sqlite3.connect(str(db_path))
+    con = sqlite3.connect(str(db_path), timeout=60)  # the app keeps writing while we re-embed: wait, don't fail
     try:
         total = con.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
         done = 0

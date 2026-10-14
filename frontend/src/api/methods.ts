@@ -48,6 +48,9 @@ import type {
   MemoryListResponse,
   KBReindexResult,
   KBSourcesResponse,
+  EmbeddingDownloadTask,
+  EmbeddingModel,
+  EmbeddingSwitchStatus,
   KBStats,
   KGContradictionResponse,
   KGEntityResolveResponse,
@@ -1616,6 +1619,15 @@ export const apiMethods = {
   },
 
   kbStats: () => get<KBStats>("/api/kb/stats"),
+
+  embeddingModels: () => get<EmbeddingModel[]>("/api/embedding-models"),
+  downloadEmbeddingModel: (modelId: string) =>
+    post<{ task_id: string; model_id: string }>("/api/embedding-models/download", { model_id: modelId }),
+  embeddingDownloadTask: (taskId: string) =>
+    get<EmbeddingDownloadTask>(`/api/embedding-models/tasks/${encodeURIComponent(taskId)}`),
+  switchEmbeddingModel: (modelId: string) =>
+    post<{ status: string; message: string }>("/api/embedding-models/switch", { model_id: modelId }),
+  embeddingSwitchStatus: () => get<EmbeddingSwitchStatus>("/api/embedding-models/switch/status"),
 
   kbQualityOps: (projectId?: string) =>
     get<KBQualityOps>(

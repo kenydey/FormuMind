@@ -92,15 +92,6 @@ def download_model(req: DownloadRequest):
         from fastapi import HTTPException
 
         raise HTTPException(400, f"未知模型: {req.model_id}")
-    if embedding_download.is_model_cached(req.model_id):
-        # 已缓存，直接返回 done 状态的 task
-        task_id = embedding_download.start_download(req.model_id)
-        # 标记为 done（实际不会下载）
-        task = embedding_download.get_task(task_id)
-        if task:
-            task.status = "done"
-            task.progress = 100.0
-        return DownloadResponse(task_id=task_id, model_id=req.model_id)
     task_id = embedding_download.start_download(req.model_id)
     return DownloadResponse(task_id=task_id, model_id=req.model_id)
 

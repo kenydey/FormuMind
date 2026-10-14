@@ -86,3 +86,21 @@ def test_a_model_of_the_wrong_dimension_is_rejected_before_any_row_is_written(tm
     con = sqlite3.connect(path)
     assert con.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding_model='old'").fetchone()[0] == 5
     con.close()
+
+
+def test_the_database_is_backed_up_with_sqlite_so_rows_are_not_lost(tmp_path, monkeypatch):
+    _install_fake(monkeypatch, 384, [])
+    path = _db(tmp_path, 5)
+    out = er.reindex_for_model(MODEL, db_path=path, batch=32)
+    bak = sqlite3.connect(out["backup"])
+    # the backup is a consistent copy of the database as it was before the run
+    assert bak.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding_model='old'").fetchone()[0] == 5
+    bak.close()
+
+
+def test_the_default_database_is_the_one_the_app_uses(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORMUMIND_DB_URL", f"sqlite:///{tmp_path / 'app.db'}")
+    assert er._configured_db_path() == (tmp_path / "app.db").resolve()
+    monkeypatch.setenv("FORMUMIND_DB_URL", "postgresql://u@h/db")
+    with pytest.raises(RuntimeError, match="SQLite"):
+        er._configured_db_path()

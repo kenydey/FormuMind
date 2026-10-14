@@ -106,10 +106,9 @@ def _home_files_are_not_the_real_ones(tmp_path_factory):
     """
     folder = tmp_path_factory.mktemp("formumind-home")
     try:
-        from app.services import recommend_ab_track, threshold_adapt
+        from app.services import recommend_ab_track
 
         recommend_ab_track._TRACK_FILE = folder / "recommend_ab_tracking.jsonl"
-        threshold_adapt._HISTORY_FILE = folder / "threshold_history.jsonl"
     except Exception:  # noqa: BLE001 - a module that cannot be imported has no file to protect
         return
     yield
@@ -119,10 +118,9 @@ def _home_files_are_not_the_real_ones(tmp_path_factory):
 def _empty_home_files():
     """Every test starts without feedback records (the session fixture only moves the files)."""
     try:
-        from app.services import recommend_ab_track, threshold_adapt
+        from app.services import recommend_ab_track
 
-        for path in (recommend_ab_track._TRACK_FILE, threshold_adapt._HISTORY_FILE):
-            path.unlink(missing_ok=True)
+        recommend_ab_track._TRACK_FILE.unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
         pass
     yield

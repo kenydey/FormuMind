@@ -787,6 +787,8 @@ def recommend_quality_dashboard(days: int = 30) -> dict:
         d["total"] += 1
         if r.adopted:
             d["adopted"] += 1
+    from ..services.recommend_ab_track import get_ab_stats
+
     return {
         "days": days,
         "total_recommendations": total,
@@ -794,4 +796,6 @@ def recommend_quality_dashboard(days: int = 30) -> dict:
         "adopt_rate": round(adopted / total, 4) if total else 0.0,
         "experiment_validated": validated,
         "by_day": by_day,
+        # prompt-version / consensus grounding rates, recorded on every recommendation (recommend_ab_track)
+        "ab": get_ab_stats(days=days),
     }

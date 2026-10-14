@@ -511,3 +511,49 @@ def test_fetch_fulltext_xml_parse_failure_returns_none():
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client) is None
+
+
+def _counting_client(*, claims_status: int, description_first_status: int = 200):
+    """A client whose /claims answers ``claims_status`` and whose first /description answers ``description_first_status``."""
+    counts = {"token": 0, "description": 0, "claims": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = urlparse(str(request.url)).path
+        if path.endswith("/auth/accesstoken"):
+            counts["token"] += 1
+            return httpx.Response(200, json=TOKEN_OK)
+        if "/search/biblio" in path:
+            return httpx.Response(200, json=_BIBLIO_HIT)
+        if path.endswith("/description"):
+            counts["description"] += 1
+            if counts["description"] == 1 and description_first_status != 200:
+                return httpx.Response(
+                    description_first_status, text="invalid_access_token", headers={"www-authenticate": "invalid_token"}
+                )
+            return httpx.Response(200, content=FULLTEXT_XML.encode(), headers={"content-type": "application/xml"})
+        if path.endswith("/claims"):
+            counts["claims"] += 1
+            if claims_status == 200:
+                return httpx.Response(200, content=CLAIMS_XML.encode(), headers={"content-type": "application/xml"})
+            return httpx.Response(claims_status, text="nope")
+        return httpx.Response(404, text=NOT_FOUND)
+
+    return httpx.Client(transport=httpx.MockTransport(handler)), counts
+
+
+@pytest.mark.parametrize("status", [404, 403, 429])
+def test_a_missing_or_throttled_section_is_not_retried_with_a_fresh_token(status):
+    """A patent without claims (404) or a quota refusal (403/429) says nothing about the token: no token refresh, no second request."""
+    client, counts = _counting_client(claims_status=status)
+    text = epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client)
+    assert text and "## description" in text and "## claims" not in text
+    assert counts["claims"] == 1
+    assert counts["token"] == 1
+
+
+def test_a_rejected_token_is_replaced_once_and_the_request_repeated():
+    client, counts = _counting_client(claims_status=200, description_first_status=400)
+    text = epo_ops.fetch_fulltext("EP1000000A1", key=KEY, secret=SECRET, client=client)
+    assert text and "## description" in text and "## claims" in text
+    assert counts["description"] == 2
+    assert counts["token"] == 2

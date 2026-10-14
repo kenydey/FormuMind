@@ -116,7 +116,7 @@ def test_the_celery_app_carries_the_built_schedule():
     # the radar's own entries, unchanged ...
     assert {k: v for k, v in schedule.items() if k in built} == built
     # ... next to the two maintenance jobs celery_app adds (daily chunk-quality sample, weekly retrieval evaluation)
-    assert set(schedule) - set(built) == {"chunk-quality-daily", "retrieval-eval-weekly"}
+    assert set(schedule) - set(built) == {"chunk-quality-daily"}
     for entry in schedule.values():
         assert entry["task"] in celery_app.tasks, f"beat schedules {entry['task']!r}, which no worker registers"
 

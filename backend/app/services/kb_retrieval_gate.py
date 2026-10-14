@@ -189,6 +189,18 @@ def is_formula_text(text: str, block_type: str | None = None) -> bool:
     return (text or "").lstrip().startswith(_FORMULA_OPENERS)
 
 
+# A short chunk that states a measured value is the target of chemistry retrieval ("固体含量 65 %", "中性盐雾 720 h"), so it
+# gets the lenient length floor and skips the word-ratio test. The unit must sit next to a number: matched as a bare
+# substring, "mm" fired on "comment", "ml" on "html"/"yaml" and the like, which let markup through. Bare Chinese terms are
+# kept as they are. Latin units are case-insensitive ("100 MG", "8 H") except L, which would otherwise match any word-final l.
+_NUMERIC_EXEMPT_RE = re.compile(
+    r"\d\s*(?:(?:wt|vol|mol)\s*)?%"
+    r"|\d\s*(?:℃|°C?|份|克|(?-i:L)(?![A-Za-z])|(?:h|s|g|min|mg|kg|ml|μm|um|nm|mm|cm|MPa|kPa|Pa|phr)(?![A-Za-z]))"
+    r"|viscosity|含量|盐雾|硬度|附着力",
+    re.IGNORECASE,
+)
+
+
 def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type: str | None = None) -> bool:
     """Chunk-body analogue of literature garbage-snippet detection.
 
@@ -208,19 +220,7 @@ def is_garbage_chunk_text(text: str, *, min_chars: int | None = None, block_type
     # 且跳过词比检查。否则短数字 chunk 被系统性丢弃（numeric 检索缺口根因）。
     # v21: 删除冗余的 import re as _re（模块顶部已有 import re）。
 
-    _is_numeric = bool(
-        re.search(r"\d", body)
-        and re.search(
-            # v19-fix: min 加前向约束，排除 "admin" 等词内匹配。
-            # v23-fix: s/g/h/mg/ml 同理收紧（照 min 前例）。
-            # v27 P2-13: IGNORECASE —— "100 MG"/"10 KG"/"8 H"/"20 MPA" 也豁免；
-            # 补 kg\b（"KG" 的 g 前是字母，走不了 (?<![a-zA-Z])g 分支）。
-            # L 保持大小写敏感（(?-i:...)）：否则 "panel" 词尾的 l 会被命中。
-            r"%|℃|°C|(?<![a-zA-Z])h\b|μm|nm|mm|cm|MPa|kPa|Pa\b|份|克|mg\b|kg\b|(?<![a-zA-Z])g\b|ml\b|(?-i:L\b)|(?<![a-zA-Z])s\b|(?<![a-zA-Z])min\b|°|phr|viscosity|含量|盐雾|硬度|附着力",
-            body,
-            re.IGNORECASE,
-        )
-    )
+    _is_numeric = bool(_NUMERIC_EXEMPT_RE.search(body))
     if _is_numeric:
         return len(body) < 8
     if len(body) < limit:

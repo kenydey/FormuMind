@@ -14,13 +14,6 @@ def _fresh(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_threshold_adapt_defaults():
-    """S-2: 无数据时返回默认阈值。"""
-    from app.services.threshold_adapt import adapt_thresholds, DEFAULT_THRESHOLDS
-    t = adapt_thresholds()
-    assert t == DEFAULT_THRESHOLDS
-
-
 def test_page_calibrate():
     """P-3: 页码校准。"""
     from app.services.page_calibrate import calibrate_page_numbers

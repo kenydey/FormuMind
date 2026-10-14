@@ -32,13 +32,35 @@ class DownloadTask:
 
 
 def _hf_cache_dir() -> Path:
+    """The Hugging Face hub cache, honouring the same variables huggingface_hub does."""
+    explicit = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if explicit:
+        return Path(explicit).expanduser()
+    home = os.environ.get("HF_HOME")
+    if home:
+        return Path(home).expanduser() / "hub"
     return Path(os.path.expanduser("~/.cache/huggingface/hub"))
 
 
+_WEIGHT_PATTERNS = ("*.safetensors", "pytorch_model*.bin", "model*.bin", "*.onnx")
+
+
 def is_model_cached(model_id: str) -> bool:
-    """检查模型是否已在本地缓存。"""
-    safe = "models--" + model_id.replace("/", "--")
-    return (_hf_cache_dir() / safe).is_dir()
+    """True when a *complete* snapshot of the model is in the local cache.
+
+    The ``models--<id>`` directory alone proves nothing: an interrupted download leaves it behind. huggingface_hub only
+    links a file into ``snapshots/<rev>/`` once it has fully arrived, so a usable snapshot has its ``config.json`` and
+    at least one weight file there.
+    """
+    root = _hf_cache_dir() / ("models--" + model_id.replace("/", "--")) / "snapshots"
+    if not root.is_dir():
+        return False
+    for snap in root.iterdir():
+        if snap.is_dir() and (snap / "config.json").exists() and any(
+            next(snap.glob(pat), None) is not None for pat in _WEIGHT_PATTERNS
+        ):
+            return True
+    return False
 
 
 def get_model_size_estimate(model_id: str) -> str:
@@ -55,9 +77,16 @@ def get_model_size_estimate(model_id: str) -> str:
 
 
 def start_download(model_id: str) -> str:
-    """启动后台下载，返回 task_id。"""
+    """启动后台下载，返回 task_id。已完整缓存的模型直接得到 done 任务，不起线程、不联网。"""
     task_id = str(uuid.uuid4())[:8]
     task = DownloadTask(task_id=task_id, model_id=model_id)
+    if is_model_cached(model_id):
+        task.status = "done"
+        task.progress = 100.0
+        task.done_at = time.time()
+        with _TASKS_LOCK:
+            _TASKS[task_id] = task
+        return task_id
     with _TASKS_LOCK:
         _TASKS[task_id] = task
     thread = threading.Thread(

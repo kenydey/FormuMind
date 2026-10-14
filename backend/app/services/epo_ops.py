@@ -433,8 +433,8 @@ def _fulltext_text(xml_bytes: bytes) -> str | None:
 def fetch_fulltext(
     publication: str,
     *,
-key: str,
-secret: str,
+    key: str,
+    secret: str,
     timeout: float = 20.0,
     client: httpx.Client | None = None,
 ) -> str | None:
@@ -459,20 +459,32 @@ secret: str,
     if not compact:
         return None
 
-    def _fetch_endpoint(owned: httpx.Client, token: str, docdb: str,
-                        endpoint: str) -> str | None:
-        """取单个端点（description/claims）的文本，失败返回 None。"""
+    def _get_endpoint(owned: httpx.Client, token: str, docdb: str, endpoint: str) -> httpx.Response | None:
         url = f"{BASE_URL}/rest-services/published-data/publication/docdb/{docdb}/{endpoint}"
         try:
-            resp = owned.get(
+            return owned.get(
                 url,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/xml"},
             )
         except httpx.HTTPError:
             return None
-        if resp.status_code != 200:
-            return None
-        return _fulltext_text(resp.content)
+
+    def _fetch_endpoint(owned: httpx.Client, token: str, docdb: str, endpoint: str) -> tuple[str | None, str]:
+        """取单个端点（description/claims）的文本；返回 (文本或 None, 当前有效的令牌)。
+
+        只有令牌被拒（400 invalid_access_token / 401）才换新令牌重试一次。404（该专利没有此部分）、403/429（配额）
+        重试也没用，只会再烧一次令牌请求和一次正文请求的 OPS 配额。
+        """
+        resp = _get_endpoint(owned, token, docdb, endpoint)
+        if resp is not None and _token_rejected(resp):
+            try:
+                token = access_token(owned, key, secret, force=True)
+            except EpoOpsError:
+                return None, token
+            resp = _get_endpoint(owned, token, docdb, endpoint)
+        if resp is None or resp.status_code != 200:
+            return None, token
+        return _fulltext_text(resp.content), token
 
     def _run(owned: httpx.Client) -> str | None:
         try:
@@ -492,14 +504,7 @@ secret: str,
         docdb = f"{hit.country}.{hit.number}.{hit.kind}.{hit.date}"
         parts = []
         for endpoint in ("description", "claims"):
-            text = _fetch_endpoint(owned, token, docdb, endpoint)
-            if text is None:
-                # 可能是 token 过期，刷新后重试一次
-                try:
-                    token = access_token(owned, key, secret, force=True)
-                    text = _fetch_endpoint(owned, token, docdb, endpoint)
-                except EpoOpsError:
-                    pass
+            text, token = _fetch_endpoint(owned, token, docdb, endpoint)
             if text:
                 parts.append(text)
         if not parts:

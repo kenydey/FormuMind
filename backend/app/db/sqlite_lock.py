@@ -39,6 +39,15 @@ def sqlite_write_lock(
     # never swallowed by the Redis error handler.
     lock = None
     client = None
+
+    def _close_client() -> None:
+        # One client per write (the URL can change between writes): close it, or its connection lingers until GC.
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     try:
         import redis
 
@@ -52,16 +61,21 @@ def sqlite_write_lock(
         lock = client.lock(_LOCK_KEY, timeout=timeout, blocking_timeout=blocking_timeout)
         acquired = lock.acquire(blocking=True, blocking_timeout=blocking_timeout)
     except Exception as exc:
-        redis_breaker.trip()
+        # Anything that stops us locking means "proceed unlocked"; only a failure to *reach* Redis (or an unknown error
+        # from a half-built client) switches it off for everyone - a single slow reply does not.
+        if not redis_breaker.is_slow_reply(exc):
+            redis_breaker.trip()
+        _close_client()
         logger.warning(
-            "Redis write lock unavailable (%s) — proceeding unlocked, not retrying for %.0f s",
+            "Redis write lock unavailable (%s) — proceeding unlocked%s",
             exc,
-            redis_breaker.RETRY_AFTER_S,
+            f", not retrying for {redis_breaker.RETRY_AFTER_S:.0f} s" if redis_breaker.is_open() else "",
         )
         yield
         return
 
     if not acquired:
+        _close_client()
         logger.warning(
             "SQLite write lock timeout after %.0fs — proceeding unlocked", blocking_timeout
         )
@@ -75,3 +89,4 @@ def sqlite_write_lock(
             lock.release()
         except Exception:
             pass
+        _close_client()

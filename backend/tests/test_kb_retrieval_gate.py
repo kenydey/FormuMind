@@ -171,3 +171,23 @@ def test_gate_chunk_indices_skips_blocked(monkeypatch):
     kept = gate_chunk_indices(chunks, [1, 0], top_k=2)
     assert kept == [0]
     assert drop_reason_for_chunk(chunks[1], source_meta=meta, wiki_ids=set()) == "blocked_domain"
+
+
+# ── numeric exemption: the unit has to be next to a number ───────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "text",
+    ["固体含量 65 %", "中性盐雾 720 h", "粘度 1200 mPa", "加入量 40 wt%", "厚度 80 μm", "pH 7, 100 MG", "固化 8 H 后测试", "加入 5 phr 助剂"],
+)
+def test_short_measurements_are_not_garbage(text):
+    assert not is_garbage_chunk_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["|||||| ----- html ===== 3 ||||||", "<<<<< >>>>> comment ##### 2 !!!!!", "***** ~~~~~ common ===== 3 -----", "///// yaml ----- 4 +++++"],
+)
+def test_symbol_noise_is_not_rescued_by_a_unit_lookalike(text):
+    # "html"/"yaml" end in "ml", "comment"/"common" contain "mm": none of them follows a number as a unit, so the
+    # word-character ratio applies and rejects the line.
+    assert is_garbage_chunk_text(text)

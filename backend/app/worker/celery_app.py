@@ -74,12 +74,6 @@ _beat_schedule["chunk-quality-daily"] = {
     "schedule": timedelta(hours=24),
     "args": (20,),
 }
-# S-5: 检索质量持续评估每周 1 次
-_beat_schedule["retrieval-eval-weekly"] = {
-    "task": "formumind.retrieval_eval_weekly",
-    "schedule": timedelta(days=7),
-    "args": (),
-}
 celery_app.conf.beat_schedule = _beat_schedule
 
 # Register Celery tasks on import.

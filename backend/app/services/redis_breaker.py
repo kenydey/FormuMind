@@ -40,6 +40,32 @@ def reset() -> None:
     _open_until = 0.0
 
 
+def _class_names(exc: BaseException) -> set[str]:
+    # By name, not isinstance: redis may be absent or stubbed, and the builtin ConnectionError/TimeoutError count too.
+    return {cls.__name__ for cls in type(exc).__mro__}
+
+
+def is_slow_reply(exc: BaseException) -> bool:
+    """True for a timeout on a *live* connection (``Timeout reading from socket``): the server is there, just slow."""
+    if "TimeoutError" not in _class_names(exc):
+        return False
+    text = str(exc).lower()
+    return any(word in text for word in ("reading", "writing", "read from", "send"))
+
+
+def is_unreachable(exc: BaseException) -> bool:
+    """True when *exc* says the server could not be reached, as opposed to it answering slowly.
+
+    ``ConnectionError`` always means unreachable. A ``TimeoutError`` while *connecting* does too, but a slow reply must
+    not: one slow ``GET`` of a large value would otherwise switch Redis off, and with it the cross-process SQLite lock,
+    for every caller in the process.
+    """
+    names = _class_names(exc)
+    if "ConnectionError" in names:
+        return True
+    return "TimeoutError" in names and not is_slow_reply(exc)
+
+
 def was_refused(exc: BaseException) -> bool:
     """True when *exc* is the breaker's own refusal, not a failure of a real connection attempt."""
     return bool(getattr(exc, "breaker_refusal", False))
@@ -53,11 +79,9 @@ def note_failure(exc: BaseException) -> bool:
     and neither does the breaker's own refusal: re-arming the window on every refused call would keep it shut for
     as long as traffic continues, and a Redis that came up in the meantime would never be noticed.
     """
-    import redis
-
     if was_refused(exc):
         return False
-    if isinstance(exc, (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)):
+    if is_unreachable(exc):
         trip()
         return True
     return False
@@ -73,11 +97,16 @@ def refuse_if_open() -> None:
         raise exc
 
 
+# Client methods that hand back an object which talks to the server itself (``pipeline().execute()``,
+# ``pubsub().get_message()``, ``lock().acquire()``): those objects are guarded too.
+_RETURNS_CONNECTED_OBJECT = frozenset({"pipeline", "pubsub", "lock"})
+
+
 class GuardedRedis:
     """A Redis client that trips the breaker when a call fails to reach the server.
 
-    Every public method of the wrapped client is passed through; ``ConnectionError`` / ``TimeoutError`` from a call
-    open the breaker and propagate unchanged, so the caller's existing fallback still runs.
+    Every public method of the wrapped client is passed through; an unreachable-server error from a call (see
+    :func:`is_unreachable`) opens the breaker and propagates unchanged, so the caller's existing fallback still runs.
     """
 
     def __init__(self, client):
@@ -87,16 +116,25 @@ class GuardedRedis:
         attr = getattr(self._client, name)
         if not callable(attr):
             return attr
-        import redis
+        wrap_result = name in _RETURNS_CONNECTED_OBJECT
 
         def call(*args, **kwargs):
             try:
-                return attr(*args, **kwargs)
-            except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
-                trip()
+                result = attr(*args, **kwargs)
+            except Exception as exc:
+                if is_unreachable(exc):
+                    trip()
                 raise
+            return GuardedRedis(result) if wrap_result else result
 
         return call
+
+    def __enter__(self):  # ``with client.pipeline() as pipe`` / ``with client.lock(...)``
+        entered = self._client.__enter__()
+        return GuardedRedis(entered) if entered is not self._client else self
+
+    def __exit__(self, *exc_info):
+        return self._client.__exit__(*exc_info)
 
 
 def client_from_url(url: str, **kwargs):
