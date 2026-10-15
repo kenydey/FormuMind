@@ -44,14 +44,16 @@ def test_write_and_read_env_roundtrip(isolated_env):
 
 
 def test_update_secrets_persists_and_masks(isolated_env):
-    update_secrets({"serpapi_api_key": "abcdefghijklmnop"})
+    key = "abcdefghijklmnopqrstuvwxyz"
+    update_secrets({"serpapi_api_key": key})
     data = read_env_file(isolated_env)
-    assert data["FORMUMIND_SERPAPI_API_KEY"] == "abcdefghijklmnop"
+    assert data["FORMUMIND_SERPAPI_API_KEY"] == key
 
     items = {s["id"]: s for s in list_secret_status()}
     assert items["serpapi_api_key"]["set"] is True
-    assert "abcd" in items["serpapi_api_key"]["masked"]
-    assert "mnop" in items["serpapi_api_key"]["masked"]
+    masked = items["serpapi_api_key"]["masked"]
+    assert masked.endswith("wxyz")  # enough to recognise the key ...
+    assert "abcd" not in masked and "mnop" not in masked  # ... and nothing that helps guess it
 
 
 def test_secrets_api_get_and_post(isolated_env):

@@ -33,6 +33,7 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_TASK_DIR",
     "FORMUMIND_TASK_PROGRESS_DIR",
     "FORMUMIND_TABLES_DIR",
+    "FORMUMIND_BACKEND_BIND",  # docker-compose.yml only: which host address the API port is published on
     # P1 owner Phase2 多用户开关
     "FORMUMIND_MULTI_USER",
     "FORMUMIND_API_TOKENS_JSON",
