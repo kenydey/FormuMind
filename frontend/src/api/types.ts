@@ -1412,7 +1412,9 @@ export interface SecretStatus {
   label: string;
   group: string;
   set: boolean;
+  /** A key is masked; an address or e-mail (`secret: false`) comes back as it is. */
   masked: string;
+  secret?: boolean;
 }
 
 export interface SecretsListResponse {

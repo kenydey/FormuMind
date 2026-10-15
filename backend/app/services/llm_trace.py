@@ -15,6 +15,13 @@ _client = None
 _client_failed = False
 
 
+def reset_client() -> None:
+    """Forget the cached Langfuse client (the keys or the host changed in the settings page)."""
+    global _client, _client_failed
+    _client = None
+    _client_failed = False
+
+
 def _get_client():
     global _client, _client_failed
     if _client_failed:
@@ -23,12 +30,13 @@ def _get_client():
         return _client
     try:
         from ..config import get_settings
+        from .runtime_secrets import effective_setting, setting_or_default
 
         settings = get_settings()
         if not settings.langfuse_enabled:
             return None
-        pk = (settings.langfuse_public_key or "").strip()
-        sk = (settings.langfuse_secret_key or "").strip()
+        pk = str(effective_setting(settings, "langfuse_public_key") or "").strip()
+        sk = str(effective_setting(settings, "langfuse_secret_key") or "").strip()
         if not pk or not sk:
             return None
         from langfuse import Langfuse
@@ -36,7 +44,7 @@ def _get_client():
         _client = Langfuse(
             public_key=pk,
             secret_key=sk,
-            host=(settings.langfuse_host or "https://cloud.langfuse.com").strip(),
+            host=str(setting_or_default(settings, "langfuse_host")).strip(),
         )
         return _client
     except Exception as exc:

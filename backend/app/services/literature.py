@@ -20,6 +20,7 @@ from ..services.runtime_secrets import effective_setting
 from .errors import degrade_return, optional_import
 from .literature_identity import identity_keys
 from .http_safe import make_client
+from .scholar_helpers import SEMANTIC_SCHOLAR_API, semantic_scholar_headers
 
 if TYPE_CHECKING:
     from .content_filter import FilterReport
@@ -384,13 +385,13 @@ def search_semantic_scholar(query: str, limit: int = 5, offset: int = 0, *, doma
         want = min(100, (limit + offset) * 3)
         with make_client(timeout=_SOURCE_TIMEOUT_SEC) as client:
             resp = client.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search",
+                f"{SEMANTIC_SCHOLAR_API}/paper/search",
                 params={
                     "query": query,
                     "limit": want,
                     "fields": "title,abstract,externalIds,paperId,fieldsOfStudy",
                 },
-                headers={"User-Agent": "FormuMind/0.1 (research platform)"},
+                headers=semantic_scholar_headers(),
             )
             resp.raise_for_status()
             payload = resp.json()

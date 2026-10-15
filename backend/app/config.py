@@ -309,6 +309,9 @@ class Settings(BaseSettings):
     openalex_content_enabled: bool = True
     # 2026-10-11：默认 None，经设置界面/API 配置，不硬编码占位邮箱。
     unpaywall_mailto: str | None = None  # Unpaywall polite-pool email
+    # Semantic Scholar Graph API key (https://www.semanticscholar.org/product/api#api-key). Optional: without it the API is
+    # shared with every other anonymous caller and answers 429 under load; with it you get a dedicated rate limit.
+    semantic_scholar_api_key: str | None = None
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
 
