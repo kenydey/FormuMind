@@ -1,6 +1,6 @@
 """GET/POST /api/settings — Runtime LLM + API secrets configuration."""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from ..config import get_settings
 from ..services.parse_profiles import apply_profile, current_profile, probe_availability, PROFILE_NAMES
@@ -10,6 +10,7 @@ from ..services.vision_extract import probe_vision, vision_available
 from ..services.runtime_secrets import effective_setting, get_runtime_secrets
 from ..services.secrets_store import (
     SECRET_REGISTRY,
+    check_env_value,
     list_secret_status,
     persist_llm_runtime,
     probe_secret,
@@ -71,6 +72,11 @@ def _validate_base_url(url: str | None) -> None:
         )
 
 
+def _single_line(value: str | None) -> str | None:
+    """These strings are persisted to ``.env``: a line break would add configuration lines of the caller's choosing."""
+    return check_env_value(value, what="value") if value else value
+
+
 class LLMSettingsUpdate(BaseModel):
     """Accept both snake_case and camelCase from the frontend."""
 
@@ -80,6 +86,8 @@ class LLMSettingsUpdate(BaseModel):
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
+
+    _no_line_breaks = field_validator("provider", "model", "api_key", "base_url", mode="after")(_single_line)
 
 
 class VisionSettingsUpdate(BaseModel):
@@ -92,6 +100,8 @@ class VisionSettingsUpdate(BaseModel):
     api_key: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
 
+    _no_line_breaks = field_validator("provider", "model", "api_key", "base_url", mode="after")(_single_line)
+
 
 class LLMModelsRefreshRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -99,6 +109,8 @@ class LLMModelsRefreshRequest(BaseModel):
     provider: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
     model: str | None = None
+
+    _no_line_breaks = field_validator("provider", "model", "base_url", mode="after")(_single_line)
 
 
 class SecretsUpdate(BaseModel):
@@ -277,7 +289,10 @@ def get_secrets_status():
 
 @router.post("/settings/secrets")
 def post_secrets_update(body: SecretsUpdate):
-    updated = update_secrets(body.updates)
+    try:
+        updated = update_secrets(body.updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"updated": updated, "secrets": list_secret_status()}
 
 

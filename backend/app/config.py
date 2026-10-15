@@ -1043,6 +1043,10 @@ class Settings(BaseSettings):
 
     # API security — unset env defers to environment: off in dev/test, on in production.
     api_auth_enabled: bool | None = None
+    # How many reverse proxies (nginx in the shipped compose) sit in front of the API and append the peer they saw to
+    # X-Forwarded-For. 0 = none: the TCP peer is the client. Without this every user behind the proxy shares one
+    # rate-limit bucket (the proxy's address); setting it higher than the real number lets a client choose its own bucket.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
     api_token: str | None = None
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
     # P2: URL 下载上限 —— 无上限时一个超大 PDF/页面可吃掉 worker 内存。

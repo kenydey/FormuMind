@@ -69,3 +69,4 @@ deploy/molscribe/hf-cache/
 .worktrees/
 
 backend/evals-history.jsonl
+.env.lock

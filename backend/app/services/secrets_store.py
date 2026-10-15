@@ -75,16 +75,60 @@ _TOPOLOGY_FLAGS = frozenset({"FORMUMIND_CELERY_EAGER"})
 
 
 def _mask(value: str | None) -> str:
+    """Enough of a secret to recognise it, never enough to help guess it: the last four characters, and nothing at all
+    for anything of 16 characters or fewer (a 12-character key would otherwise show two thirds of itself)."""
     if not value:
         return ""
-    if len(value) <= 8:
+    if len(value) <= 16:
         return "••••"
-    return f"{value[:4]}…{value[-4:]}"
+    return f"••••{value[-4:]}"
+
+
+def check_env_value(value: str, *, what: str = "value") -> str:
+    """Reject a value that cannot live on one ``.env`` line.
+
+    A newline in a saved API key or model name would otherwise end the line and start another ``KEY=value`` entry, which
+    the next start reads as configuration (``FORMUMIND_API_AUTH_ENABLED=false``, ``FORMUMIND_DEPS_INSTALL_ENABLED=true``…).
+    """
+    if any(c in value for c in "\r\n\0"):
+        raise ValueError(f"{what} must not contain line breaks or NUL characters")
+    return value
+
+
+# Link-local (cloud metadata), unspecified and multicast addresses are never a Datalab server; internal and loopback
+# addresses are the normal deployment (a compose service name, host.docker.internal, localhost), so they stay allowed.
+_METADATA_HOSTS = frozenset({"metadata.google.internal", "metadata", "instance-data"})
+
+
+def validate_datalab_url(url: str) -> str:
+    """The Datalab URL receives the ``DATALAB-API-KEY`` header on every call: it must be a plain http(s) server address."""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    check_env_value(url, what="Datalab API URL")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Datalab API URL must start with http:// or https://")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("Datalab API URL has no host name")
+    if parsed.username or parsed.password:
+        raise ValueError("Datalab API URL must not carry credentials")
+    if host in _METADATA_HOSTS:
+        raise ValueError("Datalab API URL points at a cloud metadata service")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return url
+    if ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        raise ValueError("Datalab API URL must not be a link-local, unspecified or multicast address")
+    return url
 
 
 def _quote_env_value(value: str) -> str:
     if not value:
         return ""
+    check_env_value(value)
     if any(c in value for c in ' \t#"\''):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
@@ -111,9 +155,37 @@ def read_env_file(path: Path | None = None) -> dict[str, str]:
 
 
 def write_env_updates(updates: dict[str, str], path: Path | None = None) -> None:
-    """Upsert env keys in ``.env`` (create file if missing)."""
+    """Upsert env keys in ``.env`` (create file if missing).
+
+    The file holds every API key, so it is written like a secret: under a lock (two concurrent saves used to read the same
+    old file and drop each other's keys), through a temp file and a rename (a crash can no longer leave it truncated), and
+    readable by the owner only.
+    """
+    import contextlib
+
+    from ._filelock import lock_exclusive, unlock
+    from ._fsutil import atomic_write_text
+
+    for key, val in updates.items():
+        check_env_value(val or "", what=key)  # before anything is written
     path = path or resolve_env_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a+", encoding="utf-8") as lock_file:
+        lock_exclusive(lock_file)
+        try:
+            text = _merged_env_text(path, updates)
+            try:
+                atomic_write_text(path, text)
+            except OSError:
+                # A single file bind-mounted into a container cannot be replaced by rename: write it in place instead.
+                path.write_text(text, encoding="utf-8")
+            with contextlib.suppress(OSError):  # no-op / unsupported on some filesystems and on Windows
+                os.chmod(path, 0o600)
+        finally:
+            unlock(lock_file)
+
+
+def _merged_env_text(path: Path, updates: dict[str, str]) -> str:
     existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     seen: set[str] = set()
     new_lines: list[str] = []
@@ -138,7 +210,7 @@ def write_env_updates(updates: dict[str, str], path: Path | None = None) -> None
 
     if not new_lines and not path.exists():
         new_lines.append("# FormuMind runtime secrets (managed via Settings UI)")
-    path.write_text("\n".join(new_lines).rstrip() + "\n", encoding="utf-8")
+    return "\n".join(new_lines).rstrip() + "\n"
 
 
 def bootstrap_runtime_secrets(settings: Settings | None = None) -> None:
@@ -240,11 +312,19 @@ def update_secrets(updates: dict[str, str | None]) -> list[str]:
     env_writes: dict[str, str] = {}
     updated: list[str] = []
 
+    # Validate everything first: a rejected value must not leave half of the batch applied in the runtime overlay.
+    cleaned: dict[str, str] = {}
     for attr, raw in updates.items():
         if attr not in _ATTR_BY_ID:
             continue
-        env_key, _, _ = _ATTR_BY_ID[attr]
         value = (raw or "").strip()
+        check_env_value(value, what=attr)
+        if attr == "datalab_api_url" and value:
+            validate_datalab_url(value)
+        cleaned[attr] = value
+
+    for attr, value in cleaned.items():
+        env_key, _, _ = _ATTR_BY_ID[attr]
         rs.set(attr, value or None)
         env_writes[env_key] = value
         updated.append(attr)

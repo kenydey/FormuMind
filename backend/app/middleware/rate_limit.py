@@ -41,8 +41,16 @@ _GC_INTERVAL = 100
 
 
 def _client_ip(request: Request) -> str:
-    # Never trust X-Forwarded-For: it is client-controllable and would let an
-    # attacker rotate the rate-limit key at will. Use the direct peer host.
+    # X-Forwarded-For is client-controllable, so it is only read as far as the operator says trusted proxies append to it:
+    # with N trusted proxies the Nth entry from the right is the address the outermost of them saw, and everything left of
+    # it (what the client claimed) is ignored.
+    from ..config import get_settings
+
+    hops = get_settings().trusted_proxy_hops
+    if hops > 0:
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
     if request.client:
         return request.client.host
     return "unknown"

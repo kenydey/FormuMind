@@ -151,6 +151,42 @@ def _extract_token(request: Request) -> str | None:
     return None
 
 
+def _safe_eq(a: str, b: str) -> bool:
+    """Constant-time equality for tokens. Bytes, not str: ``compare_digest`` raises TypeError on a non-ASCII str, which
+    an unauthenticated caller can send (``Authorization: Bearer é``) and turn into a 500."""
+    return secrets.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def _owner_tokens() -> dict[str, str]:
+    """``FORMUMIND_API_TOKENS_JSON`` as ``{owner: token}`` (empty when unset or malformed).
+
+    Only this direction is accepted: the keys are owner *names*, which are not secrets (they appear in responses and
+    logs), so a key must never be usable as a credential.
+    """
+    raw = api_tokens_json()
+    if not raw:
+        return {}
+    try:
+        import json
+
+        mapping = json.loads(raw)
+    except ValueError:
+        logger.warning("FORMUMIND_API_TOKENS_JSON is not valid JSON; ignoring it")
+        return {}
+    if not isinstance(mapping, dict):
+        return {}
+    return {str(owner): tok for owner, tok in mapping.items() if isinstance(tok, str) and tok}
+
+
+def _owner_of_token(provided: str) -> str | None:
+    """The owner whose token is *provided*, or None. Checks every entry so timing does not reveal which one matched."""
+    found: str | None = None
+    for owner, tok in _owner_tokens().items():
+        if _safe_eq(provided, tok):
+            found = owner
+    return found
+
+
 class ApiAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
@@ -161,25 +197,10 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         if not settings.api_auth_enabled or _is_public_path(request.url.path):
             return await call_next(request)
-        # Phase 2 多用户：允许 JSON 映射中的任意 token
-        if multi_user_enabled():
-            raw = api_tokens_json()
-            if raw:
-                try:
-                    import json
-
-                    mapping = json.loads(raw)
-                    if isinstance(mapping, dict):
-                        provided = _extract_token(request)
-                        if provided:
-                            for tok in mapping.values():
-                                if isinstance(tok, str) and tok and secrets.compare_digest(provided, tok):
-                                    return await call_next(request)
-                            # 反向 {token: owner}
-                            if provided in mapping:
-                                return await call_next(request)
-                except Exception:
-                    pass
+        provided = _extract_token(request)
+        # Phase 2 多用户：JSON 映射中的任意 owner token
+        if multi_user_enabled() and provided and _owner_of_token(provided) is not None:
+            return await call_next(request)
         token = resolve_api_token(settings)
         # Auth is enabled (checked above). A missing token must never open the
         # gate — empty-file / misconfig used to return None and silently pass.
@@ -189,8 +210,7 @@ class ApiAuthMiddleware(BaseHTTPMiddleware):
                 content={"detail": "API auth enabled but no token is configured"},
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        provided = _extract_token(request)
-        if not provided or not secrets.compare_digest(provided, token):
+        if not provided or not _safe_eq(provided, token):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API token"},
@@ -207,41 +227,20 @@ def get_current_owner(request: Request) -> str:
     """Phase 1 预埋：单 token 模式恒返回 ``default``，多用户时解析 token→owner.
 
     - 当 ``FORMUMIND_MULTI_USER != true``：恒 ``default``，所有校验 no-op。
-    - 未来多用户：``FORMUMIND_API_TOKENS_JSON='{\"alice\": \"tok1\", ...}'`` 或
-      ``Authorization: Bearer *** 时解析 owner。
-    目前仅为 experiments/tasks 的 TODO 锚点提供统一入口。
+    - 多用户：``FORMUMIND_API_TOKENS_JSON='{"alice": "tok1", ...}'`` 把 token 映射成 owner。
+      未配置映射时（仅开发联调），owner 取 token 的 SHA-256 前缀 —— 从不取 token 本身的任何字符，
+      owner 会写进数据库、响应和日志。映射已配置但 token 不在其中（鉴权关闭时才会走到这里）视为 ``default``。
     """
-    # 单 token 模式：无身份来源
     if not multi_user_enabled():
         return "default"
-    # 多用户：优先从 JSON 映射解析 token -> owner
     provided = _extract_token(request)
-    if provided:
-        # 1) JSON 映射表
-        raw = api_tokens_json()
-        if raw:
-            try:
-                import json
+    if not provided:
+        return "default"
+    if _owner_tokens():
+        return _owner_of_token(provided) or "default"
+    import hashlib
 
-                mapping = json.loads(raw)
-                if isinstance(mapping, dict):
-                    for owner, tok in mapping.items():
-                        if isinstance(tok, str) and tok and secrets.compare_digest(provided, tok):
-                            return str(owner)
-                    # 也支持 {token: owner} 反向写法
-                    if provided in mapping and isinstance(mapping[provided], str):
-                        return str(mapping[provided])
-            except Exception:
-                pass
-        # 2) 兼容 owner:token 明文（开发联调用，生产不推荐）
-        if ":" in provided:
-            maybe_owner = provided.split(":", 1)[0].strip()
-            if maybe_owner:
-                return maybe_owner
-        # 3) 单 token 回退：有 multi_user 但未配映射时，以 token 哈希前缀作 owner（便于测试）
-        #    实际部署应配置 JSON 映射。
-        return provided[:16]
-    return "default"
+    return "u-" + hashlib.sha256(provided.encode("utf-8")).hexdigest()[:12]
 
 
 def assert_owner(resource_owner: str | None, current_owner: str) -> None:
