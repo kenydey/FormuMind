@@ -146,6 +146,7 @@ def test_chunk_markdown_bookmark_fill():
 # ── A5: page_end ──
 
 def test_chunk_page_end_tracking():
+    """A chunk reports the page(s) its own text is on - not the range of the section it was accumulated in."""
     from app.services.chunking import chunk_markdown
     md = (
         "<!-- page:1 -->\n\n# 第一章\n\n" + "正文内容。" * 300
@@ -153,12 +154,45 @@ def test_chunk_page_end_tracking():
         + "\n\n<!-- page:3 -->\n\n" + "第三页内容。" * 50
     )
     chunks = chunk_markdown(md, max_chars=1600)
-    multi = [c for c in chunks if c.page_end is not None]
-    assert multi, "应有跨页 chunk"
-    assert multi[0].page_no == 1 and multi[0].page_end == 2
-    # 单页 chunk 的 page_end 为 None
-    single = [c for c in chunks if c.page_end is None]
-    assert single
+    by_text = {"正文内容": 1, "第二页内容": 2, "第三页内容": 3}
+    for c in chunks:
+        expected = next(page for marker, page in by_text.items() if marker in c.text)
+        assert c.page_no == expected, (c.page_no, expected, c.text[:12])
+        assert c.page_end is None  # none of these blocks crosses a page boundary
+    # every chunk's range is well formed
+    assert all(c.page_end is None or c.page_end >= c.page_no for c in chunks)
+
+
+def test_blocks_under_one_heading_keep_their_own_pages():
+    from app.services.chunking import chunk_markdown, page_marker
+
+    md = f"# H\n\n{page_marker(1)}\n\nalpha.\n\n{page_marker(2)}\n\nbeta.\n\n{page_marker(3)}\n\ngamma."
+    assert [(c.text, c.page_no, c.page_end) for c in chunk_markdown(md, max_chars=400, overlap=0)] == [
+        ("alpha.", 1, None), ("beta.", 2, None), ("gamma.", 3, None),
+    ]
+
+
+def test_page_ranges_are_never_inverted_for_increasing_page_markers():
+    import random
+
+    from app.services.chunking import chunk_markdown, page_marker
+
+    rng = random.Random(5)
+    for _ in range(60):
+        parts, page = [], 0
+        for _ in range(rng.randint(2, 14)):
+            r = rng.random()
+            if r < 0.25:
+                page += rng.randint(1, 2)
+                parts.append(page_marker(page))
+            elif r < 0.4:
+                parts.append("## " + "标题" * rng.randint(1, 4))
+            elif r < 0.55:
+                parts.append("| a | b |\n| --- | --- |\n| 1 | 2 |")
+            else:
+                parts.append("正文" * rng.choice([5, 80, 700]))
+        for c in chunk_markdown("\n\n".join(parts), max_chars=600, overlap=0):
+            assert c.page_end is None or c.page_no is None or c.page_end >= c.page_no, (c.page_no, c.page_end)
 
 
 # ── A4: page_citation_honesty ──

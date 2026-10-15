@@ -239,3 +239,22 @@ def test_health_is_probed_once_per_window_and_never_blocks_on_a_probe_in_flight(
     finally:
         main._health_lock.release()
     main.reset_health_cache()
+
+
+# ── task ids never become part of a path ─────────────────────────────────────────────────────────────────────────────
+
+def test_a_task_id_that_is_not_a_plain_token_is_not_written_or_read(tmp_path, monkeypatch):
+    from app.domain.schemas import TaskState, TaskStatus
+    from app.worker import tasks as T
+
+    task_dir = tmp_path / "tasks"
+    monkeypatch.setattr(T, "_task_persist_dir", lambda: task_dir)
+    status = TaskStatus(task_id="x", kind="k", state=TaskState.completed)
+    for bad in ("../ESCAPED", "a/b", "a\\b", "", "x" * 65, "ok id"):
+        T._persist_task(bad, status)
+        assert T.load_persisted_task(bad) is None
+    assert not (tmp_path / "ESCAPED.json").exists()
+    assert not task_dir.exists() or not list(task_dir.iterdir())
+    T._persist_task("fileingest-0123456789abcdef", status)  # the real shapes still work
+    T._persist_task("3f2b8c1e-9d4a-4b6e-8a1f-0c2d3e4f5a6b", status)
+    assert T.load_persisted_task("fileingest-0123456789abcdef").task_id == "x"

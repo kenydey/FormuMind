@@ -577,10 +577,18 @@ def chunk_markdown(
             return -1, cursor
         return pos, pos + len(needle)
 
+    def _page_span(pages: list[int | None], fallback_first, fallback_end) -> tuple[int | None, int | None]:
+        """(first page, last page or None when it is the same) of the blocks accumulated so far."""
+        known = [p for p in pages if p is not None]
+        if known:
+            return known[0], (known[-1] if known[-1] != known[0] else None)
+        return fallback_first, (fallback_end if fallback_end != fallback_first else None)
+
     def _emit_verbatim_or_split(
         t: str, os_: int, blocks: list[str], body_start: int,
         seg_base: int, md: str, body: str, path: str, page_no,
         para_idx: int, blk_type: str, page_end: int | None = None,
+        block_pages: list[int | None] | None = None,
     ) -> list["Chunk"]:
         """v14-5: 优先整体发射（verbatim）；md[os:oe]!=t 时退化逐 block 发射。
 
@@ -604,8 +612,14 @@ def chunk_markdown(
                 # 极端防御：找不到则跳过该 block（不应发生）
                 continue
             bos_ = seg_base + bpos
+            # A block that was emitted on its own sits on ITS page. Giving every block the range of the whole
+            # accumulated chunk labelled "beta" (page 2) as pages 1-3 and sent the citation to the wrong page.
+            if block_pages is not None and len(block_pages) == len(blocks):
+                blk_page, blk_page_end = block_pages[_bi], None
+            else:
+                blk_page, blk_page_end = page_no, page_end
             out.append(Chunk(
-                blk, path, page_no, page_end=page_end,
+                blk, path, blk_page, page_end=blk_page_end,
                 paragraph_idx=para_idx + _bi,
                 offset_start=bos_, offset_end=bos_ + len(blk),
                 block_type=blk_type or _classify_block_type(blk),
@@ -623,6 +637,8 @@ def chunk_markdown(
         current = ""
         # v14-5: 保留块边界，用于 verbatim 降级（逐 block 发射）
         current_blocks: list[str] = []
+        # The page each entry of current_blocks sits on (the latest page marker when it was added).
+        current_pages: list[int | None] = []
         current_page = page
         # PageIndex 借鉴 A5: 跨页跟踪 —— current 累积期间遇到的最末页码
         current_page_end = page
@@ -652,6 +668,7 @@ def chunk_markdown(
                         # v14-5: caption 是最后一个 block，current_blocks 去尾
                         # v15: 删死变量 caption_block（赋值后未使用）
                         current_blocks = current_blocks[:-1]
+                        current_pages = current_pages[:-1]
                         # caption 在 body 中的位置（current 起始处搜索）
                         caption_body_pos, _ = _locate_block(
                             body, caption, current_start_body
@@ -663,15 +680,16 @@ def chunk_markdown(
                     # v14-5: verbatim 不成立时退化逐 block 发射
                     os_ = seg_base + current_start_body
                     # PageIndex 借鉴 A5: 跨页 chunk 记录末页
-                    _pe = current_page_end if current_page_end != current_page else None
+                    _first, _pe = _page_span(current_pages, current_page, current_page_end)
                     chunks.extend(_emit_verbatim_or_split(
                         t, os_, current_blocks, current_start_body,
-                        seg_base, md, body, path, current_page,
+                        seg_base, md, body, path, _first,
                         current_para, pending_block or "text",
-                        page_end=_pe,
+                        page_end=_pe, block_pages=current_pages,
                     ))
                     current = ""
                     current_blocks = []
+                    current_pages = []
                     pending_block = None
                     current_page_end = current_page
                 atom = f"{caption}\n\n{block}" if caption else block
@@ -737,21 +755,23 @@ def chunk_markdown(
                 current = f"{current}\n\n{block}" if current else block
                 # v14-5: 同步块边界
                 current_blocks.append(block)
+                current_pages.append(page)
                 para_counter += 1
                 continue
             if current.strip():
                 t = current.strip()
                 os_ = seg_base + current_start_body
                 # v14-5: verbatim 不成立时退化逐 block 发射
-                _pe = current_page_end if current_page_end != current_page else None
+                _first, _pe = _page_span(current_pages, current_page, current_page_end)
                 chunks.extend(_emit_verbatim_or_split(
                     t, os_, current_blocks, current_start_body,
-                    seg_base, md, body, path, current_page,
+                    seg_base, md, body, path, _first,
                     current_para, pending_block or "text",
-                    page_end=_pe,
+                    page_end=_pe, block_pages=current_pages,
                 ))
                 current = ""
                 current_blocks = []
+                current_pages = []
                 pending_block = None
                 current_page_end = current_page
             current_page = page
@@ -773,6 +793,7 @@ def chunk_markdown(
                 para_counter += 1
                 current = ""
                 current_blocks = []
+                current_pages = []
                 continue
             else:
                 # v13-4: block 太长放不下、current 已刷出，block 独立成段
@@ -781,17 +802,18 @@ def chunk_markdown(
                 current_page_end = page
                 # v14-5: 同步块边界
                 current_blocks = [block]
+                current_pages = [page]
             para_counter += 1
         if current.strip():
             t = current.strip()
             os_ = seg_base + current_start_body
             # v14-5: verbatim 不成立时退化逐 block 发射
-            _pe = current_page_end if current_page_end != current_page else None
+            _first, _pe = _page_span(current_pages, current_page, current_page_end)
             chunks.extend(_emit_verbatim_or_split(
                 t, os_, current_blocks, current_start_body,
-                seg_base, md, body, path, current_page,
+                seg_base, md, body, path, _first,
                 current_para, pending_block or "text",
-                page_end=_pe,
+                page_end=_pe, block_pages=current_pages,
             ))
             pending_block = None
     return chunks
