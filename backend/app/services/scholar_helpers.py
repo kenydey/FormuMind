@@ -18,6 +18,21 @@ DOI_RE = re.compile(
     re.IGNORECASE,
 )
 
+SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1"
+
+
+def semantic_scholar_headers() -> dict[str, str]:
+    """Headers for Semantic Scholar Graph API calls: the configured key (``x-api-key``) lifts the shared anonymous rate limit."""
+    from ..config import get_settings
+    from .runtime_secrets import effective_setting
+
+    headers = {"User-Agent": "FormuMind/0.1 (research platform)"}
+    key = str(effective_setting(get_settings(), "semantic_scholar_api_key") or "").strip()
+    if key:
+        headers["x-api-key"] = key
+    return headers
+
+
 NoticeKind = Literal["none", "notice", "retracted_work", "corrected", "unknown"]
 
 

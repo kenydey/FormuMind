@@ -5,6 +5,9 @@ CORS for the Vite frontend.
 """
 from __future__ import annotations
 
+import re
+import threading
+import time
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -268,6 +271,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The last middleware added is the outermost. CORS has to wrap auth and rate limiting: their 401 / 429 answers are built
+# inside the stack, and without the CORS headers a browser reports them as an opaque network error instead of
+# "invalid token" / "rate limited".
+app.add_middleware(RateLimitMiddleware)
+install_api_auth(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -275,8 +283,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
-app.add_middleware(RateLimitMiddleware)
-install_api_auth(app)
 
 app.include_router(research.router)
 app.include_router(doe.router)
@@ -393,6 +399,35 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     return JSONResponse(status_code=422, content={"detail": _json_safe_errors(exc.errors())})
 
 
+class _RedactQueryToken(logging.Filter):
+    """The task stream takes the bearer token as ``?token=`` (EventSource cannot set headers); uvicorn's access log would
+    write it, in clear, next to every progress connection. Replace the value before the record is formatted."""
+
+    _TOKEN = re.compile(r"([?&]token=)[^&\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._TOKEN.sub(r"\1***", a) if isinstance(a, str) else a for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactQueryToken())
+
+
+# /health is public and does real work (a Datalab HTTP probe, a database query, a broker connect, parser discovery): with
+# nothing in front of it, one unreachable dependency made every call take ~12 s and a flood of calls pinned the thread pool.
+# Probes are shared for _HEALTH_TTL_S, and while one is running everybody else gets the previous answer.
+_HEALTH_TTL_S = 10.0
+_health_cache: dict = {"at": 0.0, "payload": None}
+_health_lock = threading.Lock()
+
+
+def reset_health_cache() -> None:
+    """Forget the cached probe (tests change the environment between calls)."""
+    with _health_lock:
+        _health_cache.update(at=0.0, payload=None)
+
+
 @app.get("/health", tags=["meta"])
 def health() -> dict:
     """Minimal liveness probe — no sensitive infrastructure details leaked.
@@ -401,6 +436,21 @@ def health() -> dict:
     error messages, and installed-extras inventory live in /health/detailed
     (which requires auth).
     """
+    now = time.monotonic()
+    cached = _health_cache["payload"]
+    if cached is not None and now - _health_cache["at"] < _HEALTH_TTL_S:
+        return cached
+    if not _health_lock.acquire(blocking=cached is None):
+        return cached  # another request is probing right now: answer with the last result instead of piling on
+    try:
+        payload = _probe_health()
+        _health_cache.update(at=time.monotonic(), payload=payload)
+        return payload
+    finally:
+        _health_lock.release()
+
+
+def _probe_health() -> dict:
     cfg = get_settings()
 
     datalab_ok, datalab_reason = check_datalab_reachable(cfg.datalab_api_url)

@@ -269,6 +269,8 @@ class DocumentChunk(Base):
     # on the IntegrityError to detect a concurrent re-ingest of one source.
     __table_args__ = (
         UniqueConstraint("source_id", "ord", name="uq_document_chunks_source_ord"),
+        # Same index alembic 0009 creates: a database built by create_all (no alembic run) must not lack it.
+        Index("ix_document_chunks_source_offset", "source_id", "offset_start"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -1007,6 +1009,8 @@ class StructureFingerprint(Base):
     __table_args__ = (
         Index("ix_struct_fp_chunk", "chunk_id"),
         Index("ix_struct_fp_source", "source_id"),
+        # Same index alembic 0049 creates (prefix LIKE lookups on the fingerprint).
+        Index("ix_structure_fingerprints_fp_hex", "fingerprint_hex"),
     )
 
 

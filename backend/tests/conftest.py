@@ -248,6 +248,8 @@ def _reset_rate_limits_before_test():
         # The embedding-model breaker opens after five failed embeddings; without sentence-transformers every real ingest
         # fails one, so by the time test_kb_index / test_v9_fixes ran their mocked ``_embed_texts`` the breaker skipped it.
         ("app.services.kb_index", "reset_embed_breaker"),
+        # /health shares one probe for ten seconds; each test sets up its own environment and expects a fresh answer.
+        ("app.main", "reset_health_cache"),
     ):
         try:
             getattr(__import__(_mod, fromlist=[_fn]), _fn)()

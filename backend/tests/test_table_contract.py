@@ -253,3 +253,23 @@ def test_wiring_fail_open_on_extraction_error(monkeypatch):
     out = parsing._maybe_extract_tables(result, b"fake-bytes")
     assert out.tables == []  # 不抛错，原结果完好
     assert out.markdown == RECIPE_MD
+
+
+def test_a_long_run_of_pipe_lines_without_a_separator_row_is_scanned_once():
+    """Every line of such a run used to restart the scan of the rest of it: 4000 lines took 9 s (O(n^2))."""
+    import time
+
+    from app.services import table_contract as tc
+
+    started = time.perf_counter()
+    blocks = tc.blocks_from_markdown("| a | b |\n" * 6000)
+    assert time.perf_counter() - started < 1.0
+    assert blocks == []
+
+
+def test_a_real_table_after_a_separator_less_pipe_run_is_still_found():
+    from app.services import table_contract as tc
+
+    md = "| x | y |\n| z | w |\n\n| 项目 | 指标 |\n| --- | --- |\n| 粘度 | 1200 |\n"
+    blocks = tc.blocks_from_markdown(md)
+    assert len(blocks) == 1 and "粘度" in blocks[0].text

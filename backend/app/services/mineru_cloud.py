@@ -33,7 +33,7 @@ from pathlib import Path
 
 from ..config import get_settings
 from .errors import degrade_return, optional_import
-from .runtime_secrets import effective_setting
+from .runtime_secrets import effective_setting, setting_or_default
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +326,7 @@ def parse_pages_batch(
     wait = float(settings.mineru_batch_timeout_s if timeout is None else timeout)
 
     try:
-        client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
+        client = mineru.MinerU(token=token, base_url=setting_or_default(settings, "mineru_base_url"))
         eff_formula, eff_table = _extract_options(formula=formula, table=table)
         documents = list(
             client.extract_batch(
@@ -414,7 +414,7 @@ def _extract(
         with os.fdopen(handle, "wb") as fh:
             fh.write(content)
 
-        client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
+        client = mineru.MinerU(token=token, base_url=setting_or_default(settings, "mineru_base_url"))
         result = client.extract(
             temp_path,
             ocr=ocr or None,
@@ -482,7 +482,7 @@ def probe_token() -> tuple[bool, str]:
     import mineru  # type: ignore
 
     try:
-        client = mineru.MinerU(token=token, base_url=settings.mineru_base_url)
+        client = mineru.MinerU(token=token, base_url=setting_or_default(settings, "mineru_base_url"))
         client.get_task("00000000-0000-0000-0000-000000000000")
         return True, "Token 有效"
     except mineru.AuthError as exc:

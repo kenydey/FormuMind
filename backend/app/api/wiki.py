@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..config import get_settings
+from ._downloads import ascii_header_value, attachment_headers
 from ..db.wiki_store import get_wiki_store
 
 router = APIRouter(prefix="/wiki", tags=["wiki"])
@@ -665,8 +666,8 @@ def export_storm_report_endpoint(body: StormReportExportRequest):
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
     headers = {
-        "Content-Disposition": f'attachment; filename="{out["filename"]}"',
-        "X-FormuMind-Report-Path": str(out.get("path") or ""),
+        **attachment_headers(str(out["filename"])),
+        "X-FormuMind-Report-Path": ascii_header_value(str(out.get("path") or "")),
         "X-FormuMind-Disclaimer": str(out.get("disclaimer") or "draft_not_claims"),
     }
     return Response(content=out["bytes"], media_type=out["media_type"], headers=headers)
@@ -700,8 +701,8 @@ def export_dossier_report_endpoint(body: DossierReportExportRequest):
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
     headers = {
-        "Content-Disposition": f'attachment; filename="{out["filename"]}"',
-        "X-FormuMind-Report-Path": str(out.get("path") or ""),
+        **attachment_headers(str(out["filename"])),
+        "X-FormuMind-Report-Path": ascii_header_value(str(out.get("path") or "")),
         "X-FormuMind-Disclaimer": str(out.get("disclaimer") or "draft_not_claims"),
     }
     return Response(content=out["bytes"], media_type=out["media_type"], headers=headers)
@@ -1505,9 +1506,7 @@ def literature_export_bib_endpoint(
     return Response(
         content=text,
         media_type="application/x-bibtex",
-        headers={
-            "Content-Disposition": f'attachment; filename="{project_id}-library.bib"',
-        },
+        headers=attachment_headers(f"{project_id}-library.bib"),
     )
 
 
@@ -1538,9 +1537,7 @@ def literature_export_ris_endpoint(
     return Response(
         content=text,
         media_type="application/x-research-info-systems",
-        headers={
-            "Content-Disposition": f'attachment; filename="{project_id}-library.ris"',
-        },
+        headers=attachment_headers(f"{project_id}-library.ris"),
     )
 
 
@@ -1619,7 +1616,5 @@ def export_ro_crate_endpoint(body: RoCrateExportRequest):
     return Response(
         content=raw,
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
+        headers=attachment_headers(filename),
     )

@@ -75,6 +75,8 @@ services:
       # Intranet lab default OFF. Production ELN compose defaults ON
       # (see docker-compose.eln.yml :-true).
       FORMUMIND_API_AUTH_ENABLED: ${FORMUMIND_API_AUTH_ENABLED:-false}
+      # The nginx in the frontend container is the one proxy in front of the API: rate-limit per real client, not per proxy.
+      FORMUMIND_TRUSTED_PROXY_HOPS: ${FORMUMIND_TRUSTED_PROXY_HOPS:-1}
       FORMUMIND_CAMPAIGN_BACKEND: datalab
       FORMUMIND_EXPERIMENT_BACKEND: datalab
       FORMUMIND_DATALAB_REQUIRED: "true"
@@ -94,7 +96,10 @@ services:
       - ./data/colbert_index:/app/data/colbert_index
       - ./data:/app/data
     ports:
-      - "8000:8000"
+      # Loopback by default, like redis and neo4j: the UI container reaches the API over the compose network, and
+      # FORMUMIND_API_AUTH_ENABLED defaults to off, so publishing 8000 to the LAN would hand every host on it the settings,
+      # ingest and dependency-install endpoints. Set FORMUMIND_BACKEND_BIND=0.0.0.0 only together with an API token.
+      - "${FORMUMIND_BACKEND_BIND:-127.0.0.1}:8000:8000"
     depends_on:
       redis:
         condition: service_healthy

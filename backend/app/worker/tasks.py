@@ -16,6 +16,7 @@ from ..services._fsutil import atomic_write_text, read_text_with_retry
 from ..services.errors import degrade_return, log_handled_exception
 import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -38,21 +39,36 @@ from .task_progress import (
 
 logger = logging.getLogger(__name__)
 
+# Task ids are uuids or ``<prefix>-<hex>``; anything else must never become part of a file name (``../x`` wrote outside
+# the task directory).
+_TASK_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _task_file(task_id: str) -> Path:
+    if not _TASK_ID_RE.fullmatch(task_id or ""):
+        raise ValueError(f"invalid task id: {task_id!r}")
+    return _task_persist_dir() / f"{task_id}.json"
+
+
 def _persist_task(task_id: str, status: TaskStatus) -> None:
     try:
-        persist_dir = _task_persist_dir()
+        path = _task_file(task_id)
+        persist_dir = path.parent
         persist_dir.mkdir(parents=True, exist_ok=True)
         data = status.model_dump()
         data["state"] = data["state"].value if hasattr(data["state"], "value") else data["state"]
         # 原子写：先写 .tmp 再 rename，避免进程崩溃时留下半截 JSON（W5）。临时文件名按进程+线程区分——
         # 固定的 ``.<task_id>.tmp`` 让同一任务的两个并发写方互相覆盖对方写到一半的文件。
-        atomic_write_text(persist_dir / f"{task_id}.json", json.dumps(data, ensure_ascii=False))
+        atomic_write_text(path, json.dumps(data, ensure_ascii=False))
     except Exception as exc:
         log_handled_exception(logger, exc, "handled exception")
 
 
 def load_persisted_task(task_id: str) -> TaskStatus | None:
-    path = _task_persist_dir() / f"{task_id}.json"
+    try:
+        path = _task_file(task_id)
+    except ValueError:
+        return None
     if not path.exists():
         return None
     try:

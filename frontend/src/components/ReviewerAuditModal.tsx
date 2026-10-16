@@ -75,13 +75,18 @@ export default function ReviewerAuditModal({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
-  const [checklist, setChecklist] = useState<ReviewChecklist | null>(null);
-  const [checklistBusy, setChecklistBusy] = useState(false);
-  const [checklistError, setChecklistError] = useState<string | null>(null);
+  // The checklist belongs to one audit run, so it is stored together with that run's id and shown only for it. It used
+  // to be reset by an effect on the run id: that effect can run after the user has already clicked "generate" (passive
+  // effects are flushed late on a busy page) and it then cancelled the request the click had just started.
+  const [checklistFor, setChecklistFor] = useState<{
+    runId: string;
+    data?: ReviewChecklist;
+    error?: string;
+    busy?: boolean;
+  } | null>(null);
   /** F-4: 列表/详情各自的序号守卫 —— 快速切换时旧请求不覆盖新数据。 */
   const listSeq = useRef(0);
   const detailSeq = useRef(0);
-  const checklistSeq = useRef(0);
 
   const loadList = useCallback(async () => {
     const seq = ++listSeq.current;
@@ -106,6 +111,7 @@ export default function ReviewerAuditModal({
     const seq = ++detailSeq.current;
     setBusy(true);
     setError(null);
+    setChecklistFor(null); // a different run was asked for: drop the previous run's checklist
     try {
       const d = await reviewsApi.getReviewRun(id);
       if (detailSeq.current !== seq) return;
@@ -131,29 +137,22 @@ export default function ReviewerAuditModal({
     }
   }, [open, initialRunId, loadDetail, loadList]);
 
-  // 清单属于某一条审计记录：换记录就丢掉上一条的（含其在途请求）。
   const detailRunId = detail?.run_id ?? null;
-  useEffect(() => {
-    checklistSeq.current += 1;
-    setChecklist(null);
-    setChecklistError(null);
-    setChecklistBusy(false);
-  }, [detailRunId]);
+  const shown = checklistFor && checklistFor.runId === detailRunId ? checklistFor : null;
+  const checklist = shown?.data ?? null;
+  const checklistBusy = Boolean(shown?.busy);
+  const checklistError = shown?.error ?? null;
 
   async function loadChecklist() {
-    if (!detailRunId) return;
-    const seq = ++checklistSeq.current;
-    setChecklistBusy(true);
-    setChecklistError(null);
+    const runId = detailRunId;
+    if (!runId) return;
+    setChecklistFor({ runId, busy: true });
+    // An answer for a run that is no longer the one in `checklistFor` (another run was opened meanwhile) is ignored.
     try {
-      const c = await reviewsApi.getReviewChecklist(detailRunId);
-      if (checklistSeq.current !== seq) return;
-      setChecklist(c);
+      const c = await reviewsApi.getReviewChecklist(runId);
+      setChecklistFor((cur) => (cur && cur.runId === runId ? { runId, data: c } : cur));
     } catch (e) {
-      if (checklistSeq.current !== seq) return;
-      setChecklistError(formatApiError(e));
-    } finally {
-      if (checklistSeq.current === seq) setChecklistBusy(false);
+      setChecklistFor((cur) => (cur && cur.runId === runId ? { runId, error: formatApiError(e) } : cur));
     }
   }
 

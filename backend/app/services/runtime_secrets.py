@@ -75,5 +75,13 @@ def effective_setting(settings: Settings, attr: str) -> Any:
     return get_runtime_secrets().effective(settings, attr)
 
 
+def setting_or_default(settings: Settings, attr: str) -> Any:
+    """The effective value, or the field's declared default when it is empty (a cleared UI entry means "use the default")."""
+    value = effective_setting(settings, attr)
+    if value:
+        return value
+    return Settings.model_fields[attr].default
+
+
 def secret_attrs_from_registry(registry: list[tuple[str, str, str, str]]) -> tuple[str, ...]:
     return tuple(attr for attr, _, _, _ in registry)

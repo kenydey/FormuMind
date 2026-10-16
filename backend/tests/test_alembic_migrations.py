@@ -641,3 +641,67 @@ def test_an_upgrade_from_before_the_table_existed_ends_in_the_same_place(
 
     run_upgrade(tmp_db_url, monkeypatch, "head")
     assert "kg_formulation_links" not in _table_names(tmp_db_url)
+
+
+# ── the migrated schema and the models agree ─────────────────────────────────────────────────────────────────────────
+
+# Objects the migrations create that no model declares. alembic 0019 added experiments.task_id / attempt_count (and an
+# index on task_id) that nothing reads or writes; dropping columns from a live SQLite table means rebuilding it, which
+# is not worth the risk for three unused objects. Anything else showing up here is real drift.
+_KNOWN_MIGRATION_ONLY = {
+    ("remove_column", "experiments", "task_id"),
+    ("remove_column", "experiments", "attempt_count"),
+    ("remove_index", "experiments", "ix_experiments_task_id"),
+}
+
+
+def _drift(diff) -> set[tuple[str, str, str]]:
+    out = set()
+    for entry in diff:
+        for item in entry if isinstance(entry, list) else [entry]:
+            kind = item[0]
+            if kind == "remove_column":
+                out.add((kind, item[2], item[3].name))
+            elif kind in ("remove_index", "add_index"):
+                out.add((kind, item[1].table.name, item[1].name))
+            else:
+                out.add((kind, str(item[1:])[:80], ""))
+    return out
+
+
+def test_a_migrated_database_has_the_same_objects_as_the_models(tmp_path, monkeypatch):
+    """create_all (Docker, tests) and ``alembic upgrade head`` must leave the same tables, columns and indexes.
+
+    They had drifted: two indexes existed only for migrated databases, so a database built by create_all was slower.
+    """
+    from alembic.autogenerate import compare_metadata
+    from alembic.runtime.migration import MigrationContext
+
+    from app.db.database import Base
+    import app.db.models  # noqa: F401  (registers every table)
+
+    url = f"sqlite:///{tmp_path / 'm.db'}"
+    run_upgrade(url, monkeypatch)
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            diff = compare_metadata(MigrationContext.configure(conn, opts={"compare_type": False}), Base.metadata)
+    finally:
+        engine.dispose()
+    assert _drift(diff) - _KNOWN_MIGRATION_ONLY == set()
+
+
+def test_create_all_builds_the_indexes_the_migrations_add(tmp_path):
+    from sqlalchemy import create_engine
+
+    from app.db.database import Base
+    import app.db.models  # noqa: F401
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
+    try:
+        Base.metadata.create_all(engine)
+        insp = inspect(engine)
+        assert "ix_document_chunks_source_offset" in {i["name"] for i in insp.get_indexes("document_chunks")}
+        assert "ix_structure_fingerprints_fp_hex" in {i["name"] for i in insp.get_indexes("structure_fingerprints")}
+    finally:
+        engine.dispose()

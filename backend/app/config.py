@@ -33,6 +33,7 @@ _INFRA_ENV_KEYS = frozenset({
     "FORMUMIND_TASK_DIR",
     "FORMUMIND_TASK_PROGRESS_DIR",
     "FORMUMIND_TABLES_DIR",
+    "FORMUMIND_BACKEND_BIND",  # docker-compose.yml only: which host address the API port is published on
     # P1 owner Phase2 多用户开关
     "FORMUMIND_MULTI_USER",
     "FORMUMIND_API_TOKENS_JSON",
@@ -308,6 +309,9 @@ class Settings(BaseSettings):
     openalex_content_enabled: bool = True
     # 2026-10-11：默认 None，经设置界面/API 配置，不硬编码占位邮箱。
     unpaywall_mailto: str | None = None  # Unpaywall polite-pool email
+    # Semantic Scholar Graph API key (https://www.semanticscholar.org/product/api#api-key). Optional: without it the API is
+    # shared with every other anonymous caller and answers 429 under load; with it you get a dedicated rate limit.
+    semantic_scholar_api_key: str | None = None
     epo_consumer_key: str | None = None      # EPO OPS API consumer key
     epo_consumer_secret: str | None = None     # EPO OPS API consumer secret
 
@@ -1043,6 +1047,10 @@ class Settings(BaseSettings):
 
     # API security — unset env defers to environment: off in dev/test, on in production.
     api_auth_enabled: bool | None = None
+    # How many reverse proxies (nginx in the shipped compose) sit in front of the API and append the peer they saw to
+    # X-Forwarded-For. 0 = none: the TCP peer is the client. Without this every user behind the proxy shares one
+    # rate-limit bucket (the proxy's address); setting it higher than the real number lets a client choose its own bucket.
+    trusted_proxy_hops: int = Field(default=0, ge=0, le=5)
     api_token: str | None = None
     ingest_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB per file
     # P2: URL 下载上限 —— 无上限时一个超大 PDF/页面可吃掉 worker 内存。

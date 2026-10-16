@@ -8,7 +8,11 @@ const GROUP_LABELS: Record<string, string> = {
   research: "学术 / 研究",
   parse: "文档解析",
   infra: "基础设施",
+  observability: "可观测性 / 追踪",
 };
+
+/** Groups whose entries have a "测试连接" probe on the server (probe_secret). */
+const TESTABLE_GROUPS = new Set(["search", "patent", "research", "parse", "observability"]);
 
 export default function ApiSettingsPanel({ reloadKey = 0 }: { reloadKey?: number }) {
   const [secrets, setSecrets] = useState<SecretStatus[]>([]);
@@ -128,9 +132,9 @@ export default function ApiSettingsPanel({ reloadKey = 0 }: { reloadKey?: number
 
                   {isEditing ? (
                     <input
-                      type="password"
+                      type={s.secret === false ? "text" : "password"}
                       autoFocus
-                      placeholder={s.masked ? `当前 ${s.masked}` : "输入新密钥"}
+                      placeholder={s.masked ? `当前 ${s.masked}` : s.secret === false ? "输入新值" : "输入新密钥"}
                       value={drafts[s.id] ?? ""}
                       onChange={(e) => setDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
                       className="w-full bg-ink border border-edge rounded px-2 py-1.5 text-sm font-mono"
@@ -158,7 +162,7 @@ export default function ApiSettingsPanel({ reloadKey = 0 }: { reloadKey?: number
                         {busy === s.id ? "保存中…" : "保存"}
                       </button>
                     )}
-                    {(s.group === "search" || s.group === "patent" || s.group === "parse") && s.set && (
+                    {TESTABLE_GROUPS.has(s.group) && s.set && (
                       <button
                         type="button"
                         onClick={() => testOne(s.id)}

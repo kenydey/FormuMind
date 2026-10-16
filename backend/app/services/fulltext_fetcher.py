@@ -158,14 +158,18 @@ def _unpaywall_locations(doi: str, timeout: float) -> tuple[list[str], list[str]
     Gold/Green location incl. PMC/repository mirrors.
     """
     settings = get_settings()
-    mailto = settings.unpaywall_mailto or settings.openalex_mailto or ""
+    from .runtime_secrets import effective_setting
+
+    mailto = (
+        effective_setting(settings, "unpaywall_mailto") or effective_setting(settings, "openalex_mailto") or ""
+    )
     if not mailto:
         return [], []
     pdfs: list[str] = []
     landings: list[str] = []
     try:
         with make_client(timeout=timeout, headers=_HEADERS) as client:
-            r = client.get(f"https://api.unpaywall.org/v2/{doi}?email={mailto}")
+            r = client.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": mailto})
         if r.status_code != 200:
             return [], []
         data = r.json()
@@ -539,10 +543,12 @@ def _fetch_semanticscholar(ev: Evidence, timeout: float) -> FetchedFulltext | No
             return None
         doi = doi_m.group(0).rstrip(".,;")
         from .http_safe import ssrf_safe_client
+        from .scholar_helpers import SEMANTIC_SCHOLAR_API, semantic_scholar_headers
         with ssrf_safe_client(timeout=timeout) as client:
             r = client.get(
-                f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}",
+                f"{SEMANTIC_SCHOLAR_API}/paper/DOI:{doi}",
                 params={"fields": "openAccessPdf,abstract"},
+                headers=semantic_scholar_headers(),
             )
             if r.status_code != 200:
                 return None

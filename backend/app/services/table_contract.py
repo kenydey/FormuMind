@@ -534,6 +534,7 @@ def blocks_from_markdown(markdown: str) -> list[MdBlock]:
 
     i = 0
     n = len(lines)
+    pipe_run_dead_until = 0
     while i < n:
         line = lines[i]
         m = _PAGE_MARKER_RE.search(line)
@@ -561,7 +562,7 @@ def blocks_from_markdown(markdown: str) -> list[MdBlock]:
             continue
 
         # Pipe table: run of '|' lines containing a separator row.
-        if stripped.startswith("|"):
+        if stripped.startswith("|") and i >= pipe_run_dead_until:
             buf = [line]
             j = i + 1
             while j < n and lines[j].strip().startswith("|"):
@@ -574,7 +575,10 @@ def blocks_from_markdown(markdown: str) -> list[MdBlock]:
                 table_line_nos.append(i)
                 i = j
                 continue
-            # Not a real table — fall through and re-scan line by line.
+            # Not a real table. A later start inside this run sees a suffix of the same lines, which cannot contain a
+            # separator row either: skip the pipe-table scan for the rest of the run (re-scanning it from every line was
+            # O(n^2) - 9 s for 4000 header-less "| a | b |" lines), but still let the borderless check look at each line.
+            pipe_run_dead_until = j
 
         # v29 Phase5 L-13: 无框线表格 —— 连续 3+ 行、多空格分隔对齐
         if _looks_like_borderless_table(lines, i, n):

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, true
 
 from ..config import get_settings
+from ._downloads import attachment_headers
 from ..db.campaign_store import get_campaign_store
 from ..db.campaign_types import WorkbenchRow
 from ..db.doe_pause_store import MAX_TTL_HOURS as MAX_PAUSE_TTL_HOURS
@@ -1039,7 +1040,7 @@ async def download_workbench_row_attachment(
             return Response(
                 content=content,
                 media_type="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                headers=attachment_headers(filename),
             )
 
     # 2) local mirror fallback (data/attachments/{local-<hash>}-{uuid}-{name})
@@ -1051,9 +1052,7 @@ async def download_workbench_row_attachment(
                 return Response(
                     content=candidate.read_bytes(),
                     media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": f'attachment; filename="{filename}"'
-                    },
+                    headers=attachment_headers(filename),
                 )
     raise HTTPException(status_code=404, detail="文件不可用（平台与本机均无副本）")
 

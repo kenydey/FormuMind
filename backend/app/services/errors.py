@@ -77,7 +77,6 @@ def classify_exception(exc: BaseException) -> ErrorKind:
     # Common permanent HTTP / parse failures
     name = type(exc).__name__
     if name in {
-        "HTTPStatusError",
         "JSONDecodeError",
         "UnicodeDecodeError",
         "ValueError",
@@ -90,10 +89,10 @@ def classify_exception(exc: BaseException) -> ErrorKind:
     try:
         import httpx
 
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-            return "permanent"
         if isinstance(exc, httpx.HTTPStatusError):
-            return "transient"
+            # 5xx and 429 clear up by themselves; any other 4xx is the request's own fault.
+            code = exc.response.status_code
+            return "transient" if code >= 500 or code == 429 else "permanent"
     except ImportError:
         pass
     return "unknown"
